@@ -73,7 +73,7 @@ const RAIL_CSS = `
 export function createHighlightRailScript(): string {
   return `
     (function () {
-      if (window.__rnHighlightRail && window.__rnHighlightRail.version === 3) {
+      if (window.__rnHighlightRail && window.__rnHighlightRail.version === 4) {
         window.__rnHighlightRail.processAll();
         true;
         return;
@@ -83,7 +83,7 @@ export function createHighlightRailScript(): string {
       const readableBlockSelector = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,div,section,article,main,td,th,dd,dt';
       const minTextLength = 2;
       const state = {
-        version: 3,
+        version: 4,
         noteMode: false,
         anchor: null,
         selectedIds: [],
@@ -281,15 +281,27 @@ export function createHighlightRailScript(): string {
         });
       }
 
-      function frameTopForContents(contents) {
+      function frameElementForContents(contents) {
         try {
-          if (contents && contents.iframe && contents.iframe.getBoundingClientRect) {
-            return contents.iframe.getBoundingClientRect().top;
-          }
+          if (!contents) return null;
+          if (contents.iframe && contents.iframe.getBoundingClientRect) return contents.iframe;
+          const win =
+            contents.window || (contents.document && contents.document.defaultView) || null;
+          const frame = win && win.frameElement;
+          return frame && frame.getBoundingClientRect ? frame : null;
+        } catch (error) {
+          return null;
+        }
+      }
+
+      function frameTopForContents(contents) {
+        const frame = frameElementForContents(contents);
+        if (!frame) return 0;
+        try {
+          return frame.getBoundingClientRect().top;
         } catch (error) {
           return 0;
         }
-        return 0;
       }
 
       function renderRail(sectionData) {
@@ -335,7 +347,13 @@ export function createHighlightRailScript(): string {
 
         const docKey = docKeyFor(contents, doc);
         let sectionData = state.sections[docKey];
-        if (!sectionData) {
+        const stale =
+          sectionData &&
+          (sectionData.doc !== doc ||
+            !sectionData.chunks.length ||
+            !sectionData.chunks[0].element ||
+            !sectionData.chunks[0].element.isConnected);
+        if (!sectionData || stale) {
           const chunks = buildChunks(contents, doc, docKey);
           sectionData = {
             docKey: docKey,
@@ -345,6 +363,8 @@ export function createHighlightRailScript(): string {
           };
           state.sections[docKey] = sectionData;
           post({ type: 'rail-ready', sectionHref: docKey, sentenceCount: chunks.length });
+        } else {
+          sectionData.contents = contents;
         }
 
         renderRail(sectionData);
@@ -501,7 +521,7 @@ export function createHighlightRailScript(): string {
       }
 
       window.__rnHighlightRail = {
-        version: 3,
+        version: 4,
         processAll: processAll,
         setNoteMode: setNoteMode,
         clearPending: clearPending,
