@@ -28,12 +28,15 @@ export function createHighlightWordScript(paragraphId: string, wordId: string): 
           node.style.backgroundColor = '';
           node.style.borderRadius = '';
         });
-        const node = doc.querySelector('[data-tts-paragraph-id="' + targetParagraphId + '"] [data-tts-word-id="' + targetWordId + '"]');
-        if (node) {
-          node.setAttribute('data-tts-active-word', 'true');
-          node.style.backgroundColor = 'rgba(184, 223, 255, 0.85)';
-          node.style.borderRadius = '3px';
-        }
+        Array.prototype.slice.call(doc.querySelectorAll('[data-tts-paragraph-id]')).forEach(function (paragraph) {
+          if (paragraph.getAttribute('data-tts-paragraph-id') !== targetParagraphId) return;
+          Array.prototype.slice.call(paragraph.querySelectorAll('[data-tts-word-id]')).forEach(function (word) {
+            if (word.getAttribute('data-tts-word-id') !== targetWordId) return;
+            word.setAttribute('data-tts-active-word', 'true');
+            word.style.backgroundColor = 'rgba(184, 223, 255, 0.85)';
+            word.style.borderRadius = '3px';
+          });
+        });
       });
     })();
     true;
@@ -99,7 +102,6 @@ function createParagraphRequestScript(
           return;
         }
 
-        const text = normalizeText(element.textContent);
         element.setAttribute('data-tts-paragraph-id', paragraphId);
         element.innerHTML = '';
         words.forEach(function (word, index) {
@@ -118,14 +120,24 @@ function createParagraphRequestScript(
         return 0;
       }
 
+      function hasNestedReadableBlock(element) {
+        return Array.prototype.slice.call(element.querySelectorAll(blockSelector)).some(function (child) {
+          return normalizeText(child.textContent).length >= minTextLength;
+        });
+      }
+
+      function isVisibleCandidate(candidate) {
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        return candidate.bottom > 0 && candidate.top < viewportHeight;
+      }
+
       function candidateFromElement(contentIndex, content, element, elementIndex) {
+        if (hasNestedReadableBlock(element)) return null;
         const text = normalizeText(element.textContent);
         if (text.length < minTextLength) return null;
         const rect = element.getBoundingClientRect();
         const top = rect.top + contentTopOffset(content);
         const bottom = rect.bottom + contentTopOffset(content);
-        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-        if (bottom <= 0 || top >= viewportHeight) return null;
         const paragraphId = 'c' + contentIndex + '-e' + elementIndex;
         const words = wordRecords(text);
         if (words.length === 0) return null;
@@ -151,16 +163,20 @@ function createParagraphRequestScript(
 
         let selected = null;
         if (kind === 'next') {
-          const currentIndex = candidates.findIndex(function (candidate) {
+          const orderedCandidates = candidates.slice().sort(function (a, b) {
+            if (a.contentIndex !== b.contentIndex) return a.contentIndex - b.contentIndex;
+            return a.elementIndex - b.elementIndex;
+          });
+          const currentIndex = orderedCandidates.findIndex(function (candidate) {
             return candidate.paragraphId === currentParagraphId;
           });
-          if (currentIndex < 0 || !candidates[currentIndex + 1]) {
+          if (currentIndex < 0 || !orderedCandidates[currentIndex + 1]) {
             send({ type: '${BRIDGE_EVENT_TYPES.missingNext}', requestId });
             return;
           }
-          selected = candidates[currentIndex + 1];
+          selected = orderedCandidates[currentIndex + 1];
         } else {
-          selected = candidates.find(function (candidate) { return candidate.bottom > 0; });
+          selected = candidates.find(isVisibleCandidate);
         }
 
         if (!selected) {
