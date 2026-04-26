@@ -154,11 +154,11 @@ function createParagraphRequestScript(
           const currentIndex = candidates.findIndex(function (candidate) {
             return candidate.paragraphId === currentParagraphId;
           });
-          selected = currentIndex >= 0 ? candidates[currentIndex + 1] : candidates[0];
-          if (!selected) {
+          if (currentIndex < 0 || !candidates[currentIndex + 1]) {
             send({ type: '${BRIDGE_EVENT_TYPES.missingNext}', requestId });
             return;
           }
+          selected = candidates[currentIndex + 1];
         } else {
           selected = candidates.find(function (candidate) { return candidate.bottom > 0; });
         }
