@@ -1,7 +1,11 @@
-# Allow project specs (overrides ~/.gitignore_global which ignores .llm/)
+# Allow project specs and mockups (overrides ~/.gitignore_global which ignores .llm/)
 !.llm/
 .llm/*
 !.llm/specs/
+!.llm/mockups/
+
+# Brainstorm session artifacts (visual companion server)
+.superpowers/
 
 # Expo / Node
 node_modules/
