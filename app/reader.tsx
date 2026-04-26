@@ -1,5 +1,5 @@
 import { Reader, useReader } from '@epubjs-react-native/core';
-import type { Location, Section } from '@epubjs-react-native/core';
+import type { Location, Section, Theme } from '@epubjs-react-native/core';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -10,6 +10,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -18,6 +19,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as library from '../src/books/library';
 import type { BookRecord } from '../src/books/library';
 import { bookFileUri } from '../src/books/import';
+import {
+  HighlightSelectionProvider,
+  useHighlightReaderBridge,
+  useHighlightSelection,
+} from '../src/highlights/SelectionContext';
+import * as highlightStore from '../src/highlights/highlights';
+import { HIGHLIGHT_PALETTE, type Highlight, type HighlightColor } from '../src/highlights/highlights';
 import {
   DEFAULT_READER_PREFERENCES,
   READER_FONT_SIZE_MAX,
@@ -36,7 +44,7 @@ import * as readerPreferences from '../src/storage/readerPreferences';
 type LoadState =
   | { status: 'loading' }
   | { status: 'missing' }
-  | { status: 'ready'; book: BookRecord; fileUri: string; initialCfi?: string }
+  | { status: 'ready'; book: BookRecord; fileUri: string; initialCfi?: string; highlights: Highlight[] }
   | { status: 'error'; message: string };
 
 export default function ReaderScreen() {
@@ -52,9 +60,10 @@ export default function ReaderScreen() {
         if (!cancelled) setState({ status: 'missing' });
         return;
       }
-      const [book, savedCfi] = await Promise.all([
+      const [book, savedCfi, savedHighlights] = await Promise.all([
         library.getById(bookId),
         lastLocation.get(bookId),
+        highlightStore.list(bookId),
       ]);
       if (cancelled) return;
       if (!book) {
@@ -66,6 +75,7 @@ export default function ReaderScreen() {
         book,
         fileUri: bookFileUri(book),
         initialCfi: savedCfi,
+        highlights: savedHighlights,
       });
     })();
     return () => {
@@ -118,6 +128,7 @@ export default function ReaderScreen() {
       book={state.book}
       fileUri={state.fileUri}
       initialCfi={state.initialCfi}
+      initialHighlights={state.highlights}
       onError={(message) => setState({ status: 'error', message })}
     />
   );
@@ -127,15 +138,17 @@ type ReaderViewProps = {
   book: BookRecord;
   fileUri: string;
   initialCfi?: string;
+  initialHighlights: Highlight[];
   onError: (message: string) => void;
 };
 
-function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
+function ReaderView({ book, fileUri, initialCfi, initialHighlights, onError }: ReaderViewProps) {
   const router = useRouter();
   const [tocVisible, setTocVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [chapterLabel, setChapterLabel] = useState<string>(book.title);
   const [preferences, setPreferences] = useState<ReaderPreferences | null>(null);
+  const [audioPlaying, setAudioPlaying] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialThemeRef = useRef(READER_THEMES[DEFAULT_READER_PREFERENCES.themeId].theme);
 
@@ -201,6 +214,7 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
 
   const activePreferences = preferences ?? DEFAULT_READER_PREFERENCES;
   const activeTheme = READER_THEMES[activePreferences.themeId];
+  const pauseAudio = useCallback(() => setAudioPlaying(false), []);
 
   if (!preferences) {
     return (
@@ -246,6 +260,74 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
           ),
         }}
       />
+      <HighlightSelectionProvider
+        bookId={book.id}
+        initialHighlights={initialHighlights}
+        onRequestPauseAudio={pauseAudio}
+      >
+        <ReaderContent
+          fileUri={fileUri}
+          initialCfi={initialCfi}
+          defaultTheme={initialThemeRef.current}
+          themeId={activePreferences.themeId}
+          audioPlaying={audioPlaying}
+          onToggleAudio={() => setAudioPlaying((playing) => !playing)}
+          onLocationChange={handleLocationChange}
+          onError={onError}
+        />
+        <ReaderPreferenceApplier
+          fontSize={activePreferences.fontSize}
+          themeId={activePreferences.themeId}
+        />
+        <ReaderSettingsModal
+          visible={settingsVisible}
+          fontSize={activePreferences.fontSize}
+          themeId={activePreferences.themeId}
+          onClose={() => setSettingsVisible(false)}
+          onFontSizeChange={(fontSize) => updatePreferences({ fontSize })}
+          onThemeChange={(themeId) => updatePreferences({ themeId })}
+        />
+        <TocModal
+          visible={tocVisible}
+          themeId={activePreferences.themeId}
+          onClose={() => setTocVisible(false)}
+        />
+      </HighlightSelectionProvider>
+    </View>
+  );
+}
+
+type PageTurnDirection = 'next' | 'previous';
+
+function ReaderContent({
+  fileUri,
+  initialCfi,
+  defaultTheme,
+  themeId,
+  audioPlaying,
+  onToggleAudio,
+  onLocationChange,
+  onError,
+}: {
+  fileUri: string;
+  initialCfi?: string;
+  defaultTheme: Theme;
+  themeId: ReaderThemeId;
+  audioPlaying: boolean;
+  onToggleAudio: () => void;
+  onLocationChange: (
+    totalLocations: number,
+    currentLocation: Location,
+    progress: number,
+    currentSection: Section | null
+  ) => void;
+  onError: (message: string) => void;
+}) {
+  const activeTheme = READER_THEMES[themeId];
+  const { injectedJavascript, handleWebViewMessage } = useHighlightReaderBridge();
+
+  return (
+    <>
       <View style={[styles.readerArea, { backgroundColor: activeTheme.colors.background }]}>
         <Reader
           src={fileUri}
@@ -253,12 +335,14 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
           width="100%"
           height="100%"
           initialLocation={initialCfi}
-          defaultTheme={initialThemeRef.current}
+          defaultTheme={defaultTheme}
           manager="default"
           flow="paginated"
           spread="none"
           fullsize={false}
-          onLocationChange={handleLocationChange}
+          injectedJavascript={injectedJavascript}
+          onWebViewMessage={handleWebViewMessage}
+          onLocationChange={onLocationChange}
           onDisplayError={(message: string) => onError(message || 'Unknown error')}
           renderLoadingFileComponent={() => (
             <View style={[styles.center, { backgroundColor: activeTheme.colors.background }]}>
@@ -272,87 +356,236 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
           )}
         />
       </View>
-      <PageTurnBar themeId={activePreferences.themeId} />
-      <ReaderPreferenceApplier
-        fontSize={activePreferences.fontSize}
-        themeId={activePreferences.themeId}
+      <ReaderBottomBar
+        themeId={themeId}
+        audioPlaying={audioPlaying}
+        onToggleAudio={onToggleAudio}
       />
-      <ReaderSettingsModal
-        visible={settingsVisible}
-        fontSize={activePreferences.fontSize}
-        themeId={activePreferences.themeId}
-        onClose={() => setSettingsVisible(false)}
-        onFontSizeChange={(fontSize) => updatePreferences({ fontSize })}
-        onThemeChange={(themeId) => updatePreferences({ themeId })}
-      />
-      <TocModal
-        visible={tocVisible}
-        themeId={activePreferences.themeId}
-        onClose={() => setTocVisible(false)}
-      />
-    </View>
+    </>
   );
 }
 
-type PageTurnDirection = 'next' | 'previous';
-
-function PageTurnBar({ themeId }: { themeId: ReaderThemeId }) {
+function ReaderBottomBar({
+  themeId,
+  audioPlaying,
+  onToggleAudio,
+}: {
+  themeId: ReaderThemeId;
+  audioPlaying: boolean;
+  onToggleAudio: () => void;
+}) {
   const { injectJavascript, atStart, atEnd, progress } = useReader();
+  const {
+    noteMode,
+    setNoteMode,
+    hasSelection,
+    selectedCount,
+    lastPickedColor,
+    saveNote,
+    erase,
+    clearSelection,
+  } = useHighlightSelection();
   const activeTheme = READER_THEMES[themeId];
   const progressPercent = normalizeProgress(progress);
+  const [draftColor, setDraftColor] = useState<HighlightColor>(lastPickedColor);
+  const [noteDraft, setNoteDraft] = useState('');
+
+  useEffect(() => {
+    setDraftColor(lastPickedColor);
+  }, [lastPickedColor]);
+
+  useEffect(() => {
+    if (hasSelection) return;
+    setNoteDraft('');
+  }, [hasSelection]);
+
   const turnPrevious = useCallback(() => {
     injectJavascript(createSpineSafePageTurnScript('previous'));
   }, [injectJavascript]);
   const turnNext = useCallback(() => {
     injectJavascript(createSpineSafePageTurnScript('next'));
   }, [injectJavascript]);
+  const saveDraft = useCallback(async () => {
+    await saveNote(noteDraft, draftColor);
+    setNoteDraft('');
+  }, [draftColor, noteDraft, saveNote]);
 
   return (
     <View
       style={[
-        styles.pageTurnBar,
+        styles.readerBottomBar,
         {
           backgroundColor: activeTheme.colors.background,
           borderTopColor: activeTheme.colors.border,
         },
       ]}
     >
-      <Pressable
-        accessibilityLabel="Previous page"
-        disabled={atStart}
-        hitSlop={8}
-        onPress={turnPrevious}
-        style={({ pressed }) => [
-          styles.pageTurnButton,
-          pressed && !atStart && { backgroundColor: activeTheme.colors.pressed },
-          atStart && styles.disabledControl,
-        ]}
-      >
-        <Ionicons name="chevron-back" size={17} color={atStart ? activeTheme.colors.mutedText : activeTheme.colors.text} />
-      </Pressable>
-
-      <View style={[styles.pageTurnProgressTrack, { backgroundColor: activeTheme.colors.border }]}>
-        <View
-          style={[
-            styles.pageTurnProgressFill,
-            { backgroundColor: activeTheme.colors.control, width: `${progressPercent}%` },
+      <View style={styles.bottomBarPrimary}>
+        <Pressable
+          accessibilityLabel={audioPlaying ? 'Pause audio' : 'Play audio'}
+          hitSlop={8}
+          onPress={onToggleAudio}
+          style={({ pressed }) => [
+            styles.bottomIconButton,
+            pressed && { backgroundColor: activeTheme.colors.pressed },
           ]}
-        />
+        >
+          <Ionicons
+            name={audioPlaying ? 'pause' : 'play'}
+            size={17}
+            color={activeTheme.colors.text}
+          />
+        </Pressable>
+
+        <Pressable
+          accessibilityLabel="Previous page"
+          disabled={atStart}
+          hitSlop={8}
+          onPress={turnPrevious}
+          style={({ pressed }) => [
+            styles.bottomIconButton,
+            pressed && !atStart && { backgroundColor: activeTheme.colors.pressed },
+            atStart && styles.disabledControl,
+          ]}
+        >
+          <Ionicons name="chevron-back" size={17} color={atStart ? activeTheme.colors.mutedText : activeTheme.colors.text} />
+        </Pressable>
+
+        <View style={[styles.pageTurnProgressTrack, { backgroundColor: activeTheme.colors.border }]}>
+          <View
+            style={[
+              styles.pageTurnProgressFill,
+              { backgroundColor: activeTheme.colors.control, width: `${progressPercent}%` },
+            ]}
+          />
+        </View>
+
+        <Pressable
+          accessibilityLabel="Next page"
+          disabled={atEnd}
+          hitSlop={8}
+          onPress={turnNext}
+          style={({ pressed }) => [
+            styles.bottomIconButton,
+            pressed && !atEnd && { backgroundColor: activeTheme.colors.pressed },
+            atEnd && styles.disabledControl,
+          ]}
+        >
+          <Ionicons name="chevron-forward" size={17} color={atEnd ? activeTheme.colors.mutedText : activeTheme.colors.text} />
+        </Pressable>
+
+        <Pressable
+          accessibilityLabel={noteMode ? 'Exit note mode' : 'Enter note mode'}
+          hitSlop={8}
+          onPress={() => setNoteMode(!noteMode)}
+          style={({ pressed }) => [
+            styles.bottomIconButton,
+            noteMode && { backgroundColor: activeTheme.colors.pressed },
+            pressed && { backgroundColor: activeTheme.colors.pressed },
+          ]}
+        >
+          <Ionicons
+            name={noteMode ? 'create' : 'create-outline'}
+            size={17}
+            color={activeTheme.colors.text}
+          />
+        </Pressable>
       </View>
 
-      <Pressable
-        accessibilityLabel="Next page"
-        disabled={atEnd}
-        hitSlop={8}
-        onPress={turnNext}
-        style={({ pressed }) => [
-          styles.pageTurnButton,
-          pressed && !atEnd && { backgroundColor: activeTheme.colors.pressed },
-          atEnd && styles.disabledControl,
-        ]}
-      >
-        <Ionicons name="chevron-forward" size={17} color={atEnd ? activeTheme.colors.mutedText : activeTheme.colors.text} />
-      </Pressable>
+      {noteMode ? (
+        <View style={styles.noteControls}>
+          <View style={styles.swatchRow}>
+            {(Object.keys(HIGHLIGHT_PALETTE) as HighlightColor[]).map((color) => {
+              const selected = color === draftColor;
+              return (
+                <Pressable
+                  key={color}
+                  accessibilityLabel={`${HIGHLIGHT_PALETTE[color].label} highlight`}
+                  disabled={!hasSelection}
+                  hitSlop={6}
+                  onPress={() => setDraftColor(color)}
+                  style={[
+                    styles.swatchButton,
+                    {
+                      borderColor: selected ? activeTheme.colors.text : activeTheme.colors.border,
+                      opacity: hasSelection ? 1 : 0.35,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.swatch,
+                      { backgroundColor: HIGHLIGHT_PALETTE[color].hex },
+                    ]}
+                  />
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <TextInput
+            accessibilityLabel="Highlight note"
+            editable={hasSelection}
+            placeholder={hasSelection ? `${selectedCount} selected` : 'Select dots'}
+            placeholderTextColor={activeTheme.colors.mutedText}
+            value={noteDraft}
+            onChangeText={setNoteDraft}
+            numberOfLines={1}
+            style={[
+              styles.noteInput,
+              {
+                borderColor: activeTheme.colors.border,
+                color: activeTheme.colors.text,
+                backgroundColor: activeTheme.colors.background,
+              },
+              !hasSelection && styles.disabledControl,
+            ]}
+          />
+
+          <Pressable
+            accessibilityLabel="Erase highlight"
+            disabled={!hasSelection}
+            hitSlop={6}
+            onPress={erase}
+            style={({ pressed }) => [
+              styles.noteActionButton,
+              pressed && hasSelection && { backgroundColor: activeTheme.colors.pressed },
+              !hasSelection && styles.disabledControl,
+            ]}
+          >
+            <Ionicons name="trash-outline" size={16} color={activeTheme.colors.text} />
+          </Pressable>
+
+          <Pressable
+            accessibilityLabel="Cancel selection"
+            disabled={!hasSelection}
+            hitSlop={6}
+            onPress={clearSelection}
+            style={({ pressed }) => [
+              styles.noteActionButton,
+              pressed && hasSelection && { backgroundColor: activeTheme.colors.pressed },
+              !hasSelection && styles.disabledControl,
+            ]}
+          >
+            <Ionicons name="close" size={17} color={activeTheme.colors.text} />
+          </Pressable>
+
+          <Pressable
+            accessibilityLabel="Save note"
+            disabled={!hasSelection}
+            hitSlop={6}
+            onPress={saveDraft}
+            style={({ pressed }) => [
+              styles.noteActionButton,
+              { backgroundColor: hasSelection ? activeTheme.colors.pressed : 'transparent' },
+              pressed && hasSelection && { backgroundColor: activeTheme.colors.pressed },
+              !hasSelection && styles.disabledControl,
+            ]}
+          >
+            <Ionicons name="checkmark" size={17} color={activeTheme.colors.text} />
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -624,15 +857,62 @@ const styles = StyleSheet.create({
   readerArea: { flex: 1 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   headerButton: { paddingHorizontal: 8, paddingVertical: 4 },
-  pageTurnBar: {
-    height: 30,
+  readerBottomBar: {
+    minHeight: 39,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 6,
+  },
+  bottomBarPrimary: {
+    height: 39,
     flexDirection: 'row',
     alignItems: 'center',
-    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 2,
   },
-  pageTurnButton: {
-    width: 44,
-    height: '100%',
+  bottomIconButton: {
+    width: 38,
+    height: 34,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noteControls: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingBottom: 6,
+  },
+  swatchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  swatchButton: {
+    width: 25,
+    height: 28,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swatch: {
+    width: 15,
+    height: 15,
+    borderRadius: 8,
+  },
+  noteInput: {
+    flex: 1,
+    height: 30,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  noteActionButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },

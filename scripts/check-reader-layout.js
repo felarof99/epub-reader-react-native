@@ -31,11 +31,11 @@ assert(
 );
 
 assert(
-  reader.includes('<PageTurnBar') &&
+  reader.includes('<ReaderBottomBar') &&
     reader.includes('createSpineSafePageTurnScript') &&
     reader.includes('book.spine.get') &&
-    reader.includes('pageTurnBar'),
-  'Reader should include an always-visible thin bottom page turn bar with a spine fallback.'
+    reader.includes('readerBottomBar'),
+  'Reader should include an always-visible thin bottom bar with page turns and a spine fallback.'
 );
 
 assert(
