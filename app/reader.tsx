@@ -271,6 +271,7 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
           )}
         />
       </View>
+      <PageTurnBar themeId={activePreferences.themeId} />
       <ReaderPreferenceApplier
         fontSize={activePreferences.fontSize}
         themeId={activePreferences.themeId}
@@ -290,6 +291,68 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
       />
     </View>
   );
+}
+
+function PageTurnBar({ themeId }: { themeId: ReaderThemeId }) {
+  const { goPrevious, goNext, atStart, atEnd, progress } = useReader();
+  const activeTheme = READER_THEMES[themeId];
+  const progressPercent = normalizeProgress(progress);
+
+  return (
+    <View
+      style={[
+        styles.pageTurnBar,
+        {
+          backgroundColor: activeTheme.colors.background,
+          borderTopColor: activeTheme.colors.border,
+        },
+      ]}
+    >
+      <Pressable
+        accessibilityLabel="Previous page"
+        disabled={atStart}
+        hitSlop={8}
+        onPress={() => goPrevious()}
+        style={({ pressed }) => [
+          styles.pageTurnButton,
+          pressed && !atStart && { backgroundColor: activeTheme.colors.pressed },
+          atStart && styles.disabledControl,
+        ]}
+      >
+        <Ionicons name="chevron-back" size={17} color={atStart ? activeTheme.colors.mutedText : activeTheme.colors.text} />
+      </Pressable>
+
+      <View style={[styles.pageTurnProgressTrack, { backgroundColor: activeTheme.colors.border }]}>
+        <View
+          style={[
+            styles.pageTurnProgressFill,
+            { backgroundColor: activeTheme.colors.control, width: `${progressPercent}%` },
+          ]}
+        />
+      </View>
+
+      <Pressable
+        accessibilityLabel="Next page"
+        disabled={atEnd}
+        hitSlop={8}
+        onPress={() => goNext()}
+        style={({ pressed }) => [
+          styles.pageTurnButton,
+          pressed && !atEnd && { backgroundColor: activeTheme.colors.pressed },
+          atEnd && styles.disabledControl,
+        ]}
+      >
+        <Ionicons name="chevron-forward" size={17} color={atEnd ? activeTheme.colors.mutedText : activeTheme.colors.text} />
+      </Pressable>
+    </View>
+  );
+}
+
+function normalizeProgress(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+
+  const percent = value <= 1 ? value * 100 : value;
+  return Math.min(100, Math.max(0, percent));
 }
 
 function ReaderPreferenceApplier({
@@ -502,6 +565,25 @@ const styles = StyleSheet.create({
   readerArea: { flex: 1 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   headerButton: { paddingHorizontal: 8, paddingVertical: 4 },
+  pageTurnBar: {
+    height: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  pageTurnButton: {
+    width: 44,
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pageTurnProgressTrack: {
+    flex: 1,
+    height: 2,
+    borderRadius: 1,
+    overflow: 'hidden',
+  },
+  pageTurnProgressFill: { height: '100%' },
   errorTitle: { fontSize: 18, fontWeight: '600', color: '#222' },
   errorMessage: { fontSize: 14, color: '#777', textAlign: 'center' },
   backButton: {

@@ -108,9 +108,17 @@ function createReaderTheme(background: string, text: string, selection: string):
   const textRule = { color: `${text} !important` };
 
   return {
+    '*': {
+      'box-sizing': 'border-box',
+    },
     body: {
       background: `${background} !important`,
       color: `${text} !important`,
+      'line-height': '1.55',
+      'overflow-wrap': 'break-word',
+      'word-break': 'break-word',
+      hyphens: 'auto',
+      padding: '0 14px !important',
     },
     p: textRule,
     span: textRule,
@@ -126,6 +134,19 @@ function createReaderTheme(background: string, text: string, selection: string):
       color: `${text} !important`,
       'pointer-events': 'auto',
       cursor: 'pointer',
+    },
+    img: {
+      'max-width': '100% !important',
+      height: 'auto !important',
+      'object-fit': 'contain',
+    },
+    svg: {
+      'max-width': '100% !important',
+      height: 'auto !important',
+    },
+    table: {
+      'max-width': '100% !important',
+      'overflow-wrap': 'anywhere',
     },
     '::selection': {
       background: selection,
