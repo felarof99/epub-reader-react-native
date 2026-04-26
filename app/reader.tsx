@@ -41,7 +41,7 @@ import {
 import { useLegacyFileSystem } from '../src/reader/useLegacyFileSystem';
 import * as lastLocation from '../src/storage/lastLocation';
 import * as readerPreferences from '../src/storage/readerPreferences';
-import { fetchVoices, generateSpeech } from '../src/tts/elevenLabs';
+import { generateSpeech } from '../src/tts/elevenLabs';
 import {
   createClearHighlightScript,
   createHighlightWordScript,
@@ -58,7 +58,6 @@ import {
 } from '../src/tts/timing';
 import {
   TTS_SPEEDS,
-  type ElevenLabsVoice,
   type TtsBridgeMessage,
   type TtsParagraph,
   type TtsSettings,
@@ -176,8 +175,6 @@ function ReaderView({ book, fileUri, initialCfi, initialHighlights, onError }: R
   const [preferences, setPreferences] = useState<ReaderPreferences | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [ttsPrefs, setTtsPrefs] = useState<TtsSettings>({ speed: 1 });
-  const [voices, setVoices] = useState<ElevenLabsVoice[]>([]);
-  const [voiceLoading, setVoiceLoading] = useState(false);
   const [ttsError, setTtsError] = useState<string | null>(null);
   const [ttsLoading, setTtsLoading] = useState(false);
   const [currentParagraph, setCurrentParagraph] = useState<TtsParagraph | null>(null);
@@ -305,13 +302,6 @@ function ReaderView({ book, fileUri, initialCfi, initialHighlights, onError }: R
     injectJavascript(createRequestNextParagraphScript(requestId, paragraphId));
   }, [injectJavascript, nextRequestId]);
 
-  const handleApiKeyChange = useCallback((nextApiKey: string) => {
-    setApiKey(nextApiKey);
-    void ttsSettings.saveApiKey(nextApiKey).catch((error) => {
-      setTtsError(error instanceof Error ? error.message : 'Could not save API key.');
-    });
-  }, []);
-
   const handleSpeedChange = useCallback(async (speed: TtsSpeed) => {
     setTtsPrefs((current) => ({ ...current, speed }));
     setSpeed(speed);
@@ -327,35 +317,6 @@ function ReaderView({ book, fileUri, initialCfi, initialHighlights, onError }: R
       setTtsError(error instanceof Error ? error.message : 'Could not seek narration.');
     });
   }, [seekBy]);
-
-  const loadVoices = useCallback(async () => {
-    const trimmedApiKey = apiKey.trim();
-    if (!trimmedApiKey) {
-      setTtsError('Enter your ElevenLabs API key first.');
-      return;
-    }
-    setVoiceLoading(true);
-    setTtsError(null);
-    try {
-      setVoices(await fetchVoices(trimmedApiKey));
-    } catch (error) {
-      setTtsError(error instanceof Error ? error.message : 'Could not load voices.');
-    } finally {
-      setVoiceLoading(false);
-    }
-  }, [apiKey]);
-
-  const saveVoice = useCallback(async (voice: ElevenLabsVoice) => {
-    try {
-      const next = await ttsSettings.saveSelectedVoice({
-        voiceId: voice.voice_id,
-        voiceName: voice.name,
-      });
-      setTtsPrefs(next);
-    } catch (error) {
-      setTtsError(error instanceof Error ? error.message : 'Could not save selected voice.');
-    }
-  }, []);
 
   const playParagraph = useCallback(async (paragraph: TtsParagraph) => {
     const generationToken = generationTokenRef.current + 1;
@@ -579,18 +540,9 @@ function ReaderView({ book, fileUri, initialCfi, initialHighlights, onError }: R
           visible={settingsVisible}
           fontSize={activePreferences.fontSize}
           themeId={activePreferences.themeId}
-          apiKey={apiKey}
-          voices={voices}
-          voiceLoading={voiceLoading}
-          selectedVoiceId={ttsPrefs.selectedVoice?.voiceId}
-          selectedVoiceName={ttsPrefs.selectedVoice?.voiceName}
-          ttsError={ttsError}
           onClose={() => setSettingsVisible(false)}
-          onApiKeyChange={handleApiKeyChange}
           onFontSizeChange={(fontSize) => updatePreferences({ fontSize })}
-          onLoadVoices={loadVoices}
           onThemeChange={(themeId) => updatePreferences({ themeId })}
-          onVoiceSelect={(voice) => void saveVoice(voice)}
         />
         <TocModal
           visible={tocVisible}
@@ -935,34 +887,16 @@ function ReaderSettingsModal({
   visible,
   fontSize,
   themeId,
-  apiKey,
-  voices,
-  voiceLoading,
-  selectedVoiceId,
-  selectedVoiceName,
-  ttsError,
   onClose,
-  onApiKeyChange,
   onFontSizeChange,
-  onLoadVoices,
   onThemeChange,
-  onVoiceSelect,
 }: {
   visible: boolean;
   fontSize: number;
   themeId: ReaderThemeId;
-  apiKey: string;
-  voices: ElevenLabsVoice[];
-  voiceLoading: boolean;
-  selectedVoiceId?: string;
-  selectedVoiceName?: string;
-  ttsError: string | null;
   onClose: () => void;
-  onApiKeyChange: (apiKey: string) => void;
   onFontSizeChange: (fontSize: number) => void;
-  onLoadVoices: () => void;
   onThemeChange: (themeId: ReaderThemeId) => void;
-  onVoiceSelect: (voice: ElevenLabsVoice) => void;
 }) {
   const activeTheme = READER_THEMES[themeId];
   const canDecrease = fontSize > READER_FONT_SIZE_MIN;
@@ -1045,47 +979,6 @@ function ReaderSettingsModal({
             </View>
           </View>
 
-          <View style={styles.settingsSection}>
-            <Text style={[styles.settingLabel, { color: activeTheme.colors.mutedText }]}>Text-to-Speech</Text>
-            <TextInput
-              value={apiKey}
-              onChangeText={onApiKeyChange}
-              placeholder="ElevenLabs API key"
-              placeholderTextColor={activeTheme.colors.mutedText}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={[styles.apiKeyInput, { color: activeTheme.colors.text, borderColor: activeTheme.colors.border }]}
-            />
-            <TouchableOpacity onPress={onLoadVoices} disabled={voiceLoading || !apiKey.trim()} style={[styles.loadVoicesButton, { backgroundColor: activeTheme.colors.control }, (voiceLoading || !apiKey.trim()) && styles.disabledControl]}>
-              {voiceLoading ? (
-                <ActivityIndicator color={activeTheme.colors.controlText} />
-              ) : (
-                <Text style={[styles.loadVoicesText, { color: activeTheme.colors.controlText }]}>Load voices</Text>
-              )}
-            </TouchableOpacity>
-            {selectedVoiceName ? (
-              <Text style={[styles.selectedVoiceText, { color: activeTheme.colors.mutedText }]}>Selected: {selectedVoiceName}</Text>
-            ) : null}
-            {ttsError ? (
-              <Text style={[styles.ttsSettingsError, { color: activeTheme.colors.mutedText }]}>{ttsError}</Text>
-            ) : null}
-            <View style={styles.voiceList}>
-              {voices.map((voice) => (
-                <Pressable
-                  key={voice.voice_id}
-                  onPress={() => onVoiceSelect(voice)}
-                  style={({ pressed }) => [
-                    styles.voiceRow,
-                    { borderColor: activeTheme.colors.border, backgroundColor: pressed ? activeTheme.colors.pressed : activeTheme.colors.background },
-                  ]}
-                >
-                  <Text style={[styles.voiceName, { color: activeTheme.colors.text }]}>{voice.name}</Text>
-                  {voice.voice_id === selectedVoiceId ? <Ionicons name="checkmark" size={20} color={activeTheme.colors.text} /> : null}
-                </Pressable>
-              ))}
-            </View>
-          </View>
         </View>
       </SafeAreaView>
     </Modal>
@@ -1327,35 +1220,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   disabledControl: { opacity: 0.35 },
-  apiKeyInput: {
-    minHeight: 46,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    fontSize: 15,
-  },
-  loadVoicesButton: {
-    alignSelf: 'flex-start',
-    minHeight: 42,
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadVoicesText: { fontSize: 15, fontWeight: '700' },
-  selectedVoiceText: { fontSize: 13 },
-  ttsSettingsError: { fontSize: 13 },
-  voiceList: { gap: 8 },
-  voiceRow: {
-    minHeight: 46,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  voiceName: { fontSize: 15, fontWeight: '600' },
   themeList: { gap: 10 },
   themeRow: {
     minHeight: 52,

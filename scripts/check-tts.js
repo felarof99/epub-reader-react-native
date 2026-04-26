@@ -1,7 +1,9 @@
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
 
+const library = fs.readFileSync('app/index.tsx', 'utf8');
 const reader = fs.readFileSync('app/reader.tsx', 'utf8');
+const settingsScreen = fs.readFileSync('app/settings.tsx', 'utf8');
 const elevenLabs = fs.readFileSync('src/tts/elevenLabs.ts', 'utf8');
 const playback = fs.readFileSync('src/tts/useTtsPlayback.ts', 'utf8');
 const bridge = fs.readFileSync('src/tts/readerBridge.ts', 'utf8');
@@ -100,8 +102,22 @@ assert(
 assert(
   reader.includes('onWebViewMessage={handleTtsWebViewMessage}') &&
     reader.includes('createRequestVisibleParagraphScript') &&
-    reader.includes('fetchVoices'),
-  'Reader should wire WebView extraction, highlighting, voice loading, and speech generation.'
+    reader.includes('generateSpeech') &&
+    !reader.includes('fetchVoices') &&
+    !reader.includes('placeholder="ElevenLabs API key"'),
+  'Reader should wire WebView extraction, highlighting, and speech generation without rendering global voice setup.'
+);
+
+assert(
+  library.includes("router.push('/settings')") &&
+    library.includes('settings-outline') &&
+    settingsScreen.includes('fetchVoices(trimmedApiKey)') &&
+    settingsScreen.includes('ttsSettings.saveSelectedVoice') &&
+    settingsScreen.includes('SAMPLE_PREVIEW_TEXT') &&
+    settingsScreen.includes('generateSpeech({') &&
+    settingsScreen.includes('loadAndPlay({ audioBase64: speech.audio_base64, speed: settings.speed })') &&
+    settingsScreen.includes('Preview ${voice.name}'),
+  'Library settings should own ElevenLabs API key, voice loading, voice selection, and per-voice preview playback.'
 );
 
 assertIncludes(

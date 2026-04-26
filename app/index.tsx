@@ -86,18 +86,27 @@ export default function LibraryScreen() {
         options={{
           title: 'Library',
           headerRight: () => (
-            <TouchableOpacity
-              onPress={handleImport}
-              disabled={importing}
-              style={styles.headerButton}
-              accessibilityLabel="Import EPUB"
-            >
-              {importing ? (
-                <ActivityIndicator size="small" />
-              ) : (
-                <Ionicons name="add" size={26} color="#111" />
-              )}
-            </TouchableOpacity>
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                onPress={() => router.push('/settings')}
+                style={styles.headerButton}
+                accessibilityLabel="Settings"
+              >
+                <Ionicons name="settings-outline" size={23} color="#111" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleImport}
+                disabled={importing}
+                style={styles.headerButton}
+                accessibilityLabel="Import EPUB"
+              >
+                {importing ? (
+                  <ActivityIndicator size="small" />
+                ) : (
+                  <Ionicons name="add" size={26} color="#111" />
+                )}
+              </TouchableOpacity>
+            </View>
           ),
         }}
       />
@@ -186,6 +195,7 @@ function EmptyState({ onImport, importing }: { onImport: () => void; importing: 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   headerButton: { paddingHorizontal: 8, paddingVertical: 4 },
   listContent: { paddingVertical: 4 },
   row: { paddingHorizontal: 20, paddingVertical: 16, backgroundColor: '#fff' },
