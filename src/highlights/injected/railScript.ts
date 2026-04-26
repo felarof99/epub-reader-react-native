@@ -70,15 +70,17 @@ const RAIL_CSS = `
 export function createHighlightRailScript(): string {
   return `
     (function () {
-      if (window.__rnHighlightRail && window.__rnHighlightRail.version === 1) {
+      if (window.__rnHighlightRail && window.__rnHighlightRail.version === 2) {
         window.__rnHighlightRail.processAll();
         true;
         return;
       }
 
       const railCss = ${JSON.stringify(RAIL_CSS)};
+      const readableBlockSelector = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,div,section,article,main,td,th,dd,dt';
+      const minTextLength = 2;
       const state = {
-        version: 1,
+        version: 2,
         noteMode: false,
         anchor: null,
         selectedIds: [],
@@ -125,11 +127,25 @@ export function createHighlightRailScript(): string {
         (doc.head || doc.documentElement).appendChild(style);
       }
 
+      function normalizeText(text) {
+        return (text || '').replace(/\\s+/g, ' ').trim();
+      }
+
+      function hasNestedReadableBlock(element) {
+        return Array.prototype.slice.call(element.querySelectorAll(readableBlockSelector)).some(function (child) {
+          return normalizeText(child.textContent).length >= minTextLength;
+        });
+      }
+
       function selectableBlocks(doc) {
         return Array.prototype.slice.call(
-          doc.querySelectorAll('p, li, blockquote, h1, h2, h3, h4, h5, h6')
+          doc.querySelectorAll(readableBlockSelector)
         ).filter(function (node) {
-          return node && node.textContent && node.textContent.trim().length > 0;
+          return (
+            node &&
+            normalizeText(node.textContent).length >= minTextLength &&
+            !hasNestedReadableBlock(node)
+          );
         });
       }
 
@@ -231,7 +247,7 @@ export function createHighlightRailScript(): string {
           return {
             id: id,
             order: index,
-            text: (element.textContent || '').replace(/\\s+/g, ' ').trim(),
+            text: normalizeText(element.textContent),
             cfiRange: cfiForElement(contents, element),
             element: element,
             dot: null,
@@ -451,7 +467,7 @@ export function createHighlightRailScript(): string {
       }
 
       window.__rnHighlightRail = {
-        version: 1,
+        version: 2,
         processAll: processAll,
         setNoteMode: setNoteMode,
         clearPending: clearPending,
