@@ -10,6 +10,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -26,12 +27,37 @@ import {
   clampReaderFontSize,
   fontSizePercent,
   nextReaderFontSize,
+  readerThemeForPreferences,
   type ReaderPreferences,
   type ReaderThemeId,
 } from '../src/reader/preferences';
 import { useLegacyFileSystem } from '../src/reader/useLegacyFileSystem';
 import * as lastLocation from '../src/storage/lastLocation';
 import * as readerPreferences from '../src/storage/readerPreferences';
+import { fetchVoices, generateSpeech } from '../src/tts/elevenLabs';
+import {
+  createClearHighlightScript,
+  createHighlightWordScript,
+  createRequestNextParagraphScript,
+  createRequestVisibleParagraphScript,
+} from '../src/tts/readerBridge';
+import * as ttsSettings from '../src/tts/settings';
+import {
+  activeWordIdAtTime,
+  formatTtsSpeed,
+  mapAlignmentToWordTimings,
+  nextTtsSpeed,
+  previousTtsSpeed,
+} from '../src/tts/timing';
+import type {
+  ElevenLabsVoice,
+  TtsBridgeMessage,
+  TtsParagraph,
+  TtsSettings,
+  TtsSpeed,
+  WordTiming,
+} from '../src/tts/types';
+import { useTtsPlayback } from '../src/tts/useTtsPlayback';
 
 type LoadState =
   | { status: 'loading' }
@@ -136,8 +162,25 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [chapterLabel, setChapterLabel] = useState<string>(book.title);
   const [preferences, setPreferences] = useState<ReaderPreferences | null>(null);
+  const [apiKey, setApiKey] = useState('');
+  const [ttsPrefs, setTtsPrefs] = useState<TtsSettings>({ speed: 1 });
+  const [voices, setVoices] = useState<ElevenLabsVoice[]>([]);
+  const [voiceLoading, setVoiceLoading] = useState(false);
+  const [ttsError, setTtsError] = useState<string | null>(null);
+  const [ttsLoading, setTtsLoading] = useState(false);
+  const [currentParagraph, setCurrentParagraph] = useState<TtsParagraph | null>(null);
+  const [wordTimings, setWordTimings] = useState<WordTiming[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const initialThemeRef = useRef(READER_THEMES[DEFAULT_READER_PREFERENCES.themeId].theme);
+  const requestIdRef = useRef(0);
+  const pendingRequestRef = useRef<'visible' | 'next' | null>(null);
+  const latestRequestIdRef = useRef<string | null>(null);
+  const generationTokenRef = useRef(0);
+  const exhaustedAutoplayParagraphIdRef = useRef<string | null>(null);
+  const lastHighlightedWordRef = useRef<{ paragraphId: string; wordId: string } | null>(null);
+  const initialThemeRef = useRef(readerThemeForPreferences(DEFAULT_READER_PREFERENCES));
+  const playback = useTtsPlayback();
+  const { injectJavascript } = useReader();
+  const { loadAndPlay, seekBy, setSpeed, stop } = playback;
 
   useEffect(() => {
     return () => {
@@ -150,9 +193,27 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
 
     readerPreferences.get().then((savedPreferences) => {
       if (cancelled) return;
+      initialThemeRef.current = readerThemeForPreferences(savedPreferences);
       setPreferences(savedPreferences);
-      initialThemeRef.current = READER_THEMES[savedPreferences.themeId].theme;
     });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    Promise.all([ttsSettings.getApiKey(), ttsSettings.getSettings()])
+      .then(([savedApiKey, savedSettings]) => {
+        if (cancelled) return;
+        setApiKey(savedApiKey);
+        setTtsPrefs(savedSettings);
+      })
+      .catch((error) => {
+        console.warn('TTS settings load failed', error);
+      });
 
     return () => {
       cancelled = true;
@@ -198,6 +259,206 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
     },
     [book.id, book.title]
   );
+
+  const nextRequestId = useCallback(() => {
+    requestIdRef.current += 1;
+    return `tts-${requestIdRef.current}`;
+  }, []);
+
+  const clearTtsHighlight = useCallback(() => {
+    if (!lastHighlightedWordRef.current) return;
+    lastHighlightedWordRef.current = null;
+    injectJavascript(createClearHighlightScript());
+  }, [injectJavascript]);
+
+  const requestVisibleParagraph = useCallback(() => {
+    const requestId = nextRequestId();
+    pendingRequestRef.current = 'visible';
+    latestRequestIdRef.current = requestId;
+    exhaustedAutoplayParagraphIdRef.current = null;
+    setTtsLoading(true);
+    setTtsError(null);
+    injectJavascript(createRequestVisibleParagraphScript(requestId));
+  }, [injectJavascript, nextRequestId]);
+
+  const requestNextParagraph = useCallback((paragraphId: string) => {
+    const requestId = nextRequestId();
+    pendingRequestRef.current = 'next';
+    latestRequestIdRef.current = requestId;
+    setTtsLoading(true);
+    setTtsError(null);
+    injectJavascript(createRequestNextParagraphScript(requestId, paragraphId));
+  }, [injectJavascript, nextRequestId]);
+
+  const handleApiKeyChange = useCallback((nextApiKey: string) => {
+    setApiKey(nextApiKey);
+    void ttsSettings.saveApiKey(nextApiKey).catch((error) => {
+      setTtsError(error instanceof Error ? error.message : 'Could not save API key.');
+    });
+  }, []);
+
+  const handleSpeedChange = useCallback(async (speed: TtsSpeed) => {
+    setTtsPrefs((current) => ({ ...current, speed }));
+    setSpeed(speed);
+    try {
+      await ttsSettings.saveSpeed(speed);
+    } catch (error) {
+      setTtsError(error instanceof Error ? error.message : 'Could not save narration speed.');
+    }
+  }, [setSpeed]);
+
+  const handleSeekBy = useCallback((seconds: number) => {
+    void seekBy(seconds).catch((error) => {
+      setTtsError(error instanceof Error ? error.message : 'Could not seek narration.');
+    });
+  }, [seekBy]);
+
+  const loadVoices = useCallback(async () => {
+    if (!apiKey.trim()) {
+      setTtsError('Enter your ElevenLabs API key first.');
+      return;
+    }
+    setVoiceLoading(true);
+    setTtsError(null);
+    try {
+      setVoices(await fetchVoices(apiKey));
+    } catch (error) {
+      setTtsError(error instanceof Error ? error.message : 'Could not load voices.');
+    } finally {
+      setVoiceLoading(false);
+    }
+  }, [apiKey]);
+
+  const saveVoice = useCallback(async (voice: ElevenLabsVoice) => {
+    try {
+      const next = await ttsSettings.saveSelectedVoice({
+        voiceId: voice.voice_id,
+        voiceName: voice.name,
+      });
+      setTtsPrefs(next);
+    } catch (error) {
+      setTtsError(error instanceof Error ? error.message : 'Could not save selected voice.');
+    }
+  }, []);
+
+  const playParagraph = useCallback(async (paragraph: TtsParagraph) => {
+    const generationToken = generationTokenRef.current + 1;
+    generationTokenRef.current = generationToken;
+
+    if (!apiKey.trim()) {
+      setTtsError('Enter your ElevenLabs API key in settings first.');
+      pendingRequestRef.current = null;
+      latestRequestIdRef.current = null;
+      setTtsLoading(false);
+      clearTtsHighlight();
+      void stop();
+      return;
+    }
+    if (!ttsPrefs.selectedVoice?.voiceId) {
+      setTtsError('Load and select an ElevenLabs voice first.');
+      pendingRequestRef.current = null;
+      latestRequestIdRef.current = null;
+      setTtsLoading(false);
+      clearTtsHighlight();
+      void stop();
+      return;
+    }
+
+    setTtsLoading(true);
+    setTtsError(null);
+
+    try {
+      const speech = await generateSpeech({
+        apiKey,
+        voiceId: ttsPrefs.selectedVoice.voiceId,
+        text: paragraph.text,
+      });
+      const alignment = speech.normalized_alignment ?? speech.alignment;
+      const timings = mapAlignmentToWordTimings(alignment, paragraph.words);
+      if (generationTokenRef.current !== generationToken) return;
+
+      setCurrentParagraph(paragraph);
+      setWordTimings(timings);
+      exhaustedAutoplayParagraphIdRef.current = null;
+      await loadAndPlay({ audioBase64: speech.audio_base64, speed: ttsPrefs.speed });
+    } catch (error) {
+      if (generationTokenRef.current === generationToken) {
+        setTtsError(error instanceof Error ? error.message : 'Could not start text-to-speech.');
+        clearTtsHighlight();
+      }
+    } finally {
+      if (generationTokenRef.current === generationToken) {
+        setTtsLoading(false);
+      }
+    }
+  }, [apiKey, clearTtsHighlight, loadAndPlay, stop, ttsPrefs.selectedVoice?.voiceId, ttsPrefs.speed]);
+
+  const handleTtsWebViewMessage = useCallback((message: TtsBridgeMessage) => {
+    if (message.requestId !== latestRequestIdRef.current) return;
+
+    if (message.type === 'ttsParagraph') {
+      pendingRequestRef.current = null;
+      latestRequestIdRef.current = null;
+      void playParagraph(message.paragraph);
+      return;
+    }
+
+    if (message.type === 'ttsNextParagraphMissing') {
+      pendingRequestRef.current = null;
+      latestRequestIdRef.current = null;
+      exhaustedAutoplayParagraphIdRef.current = currentParagraph?.paragraphId ?? null;
+      setTtsLoading(false);
+      clearTtsHighlight();
+      return;
+    }
+
+    if (message.type === 'ttsParagraphError') {
+      pendingRequestRef.current = null;
+      latestRequestIdRef.current = null;
+      setTtsError(message.message);
+      setTtsLoading(false);
+      clearTtsHighlight();
+    }
+  }, [clearTtsHighlight, currentParagraph?.paragraphId, playParagraph]);
+
+  useEffect(() => {
+    if (!playback.isPlaying || ttsLoading || !currentParagraph) {
+      clearTtsHighlight();
+      return;
+    }
+
+    const activeWordId = activeWordIdAtTime(wordTimings, playback.currentTime);
+    if (!activeWordId) {
+      clearTtsHighlight();
+      return;
+    }
+
+    const lastHighlightedWord = lastHighlightedWordRef.current;
+    if (
+      lastHighlightedWord?.paragraphId === currentParagraph.paragraphId &&
+      lastHighlightedWord.wordId === activeWordId
+    ) {
+      return;
+    }
+
+    lastHighlightedWordRef.current = { paragraphId: currentParagraph.paragraphId, wordId: activeWordId };
+    injectJavascript(createHighlightWordScript(currentParagraph.paragraphId, activeWordId));
+  }, [clearTtsHighlight, currentParagraph, injectJavascript, playback.currentTime, playback.isPlaying, ttsLoading, wordTimings]);
+
+  useEffect(() => {
+    if (!currentParagraph || playback.isPlaying || ttsLoading || pendingRequestRef.current) return;
+    if (exhaustedAutoplayParagraphIdRef.current === currentParagraph.paragraphId) return;
+    if (playback.duration > 0 && playback.currentTime >= playback.duration - 0.15) {
+      requestNextParagraph(currentParagraph.paragraphId);
+    }
+  }, [currentParagraph, playback.currentTime, playback.duration, playback.isPlaying, requestNextParagraph, ttsLoading]);
+
+  useEffect(() => {
+    return () => {
+      void stop();
+      clearTtsHighlight();
+    };
+  }, [clearTtsHighlight, stop]);
 
   const activePreferences = preferences ?? DEFAULT_READER_PREFERENCES;
   const activeTheme = READER_THEMES[activePreferences.themeId];
@@ -254,11 +515,11 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
           height="100%"
           initialLocation={initialCfi}
           defaultTheme={initialThemeRef.current}
-          manager="default"
-          flow="paginated"
-          spread="none"
-          fullsize={false}
+          manager="continuous"
+          flow="scrolled-doc"
+          keepScrollOffsetOnLocationChange
           onLocationChange={handleLocationChange}
+          onWebViewMessage={handleTtsWebViewMessage}
           onDisplayError={(message: string) => onError(message || 'Unknown error')}
           renderLoadingFileComponent={() => (
             <View style={[styles.center, { backgroundColor: activeTheme.colors.background }]}>
@@ -272,7 +533,27 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
           )}
         />
       </View>
-      <PageTurnBar themeId={activePreferences.themeId} />
+      <TtsControlBar
+        themeId={activePreferences.themeId}
+        loading={ttsLoading}
+        playing={playback.isPlaying}
+        loaded={playback.isLoaded}
+        speed={ttsPrefs.speed}
+        error={ttsError}
+        onPlayPause={() => {
+          if (playback.isPlaying) {
+            playback.pause();
+          } else if (playback.isLoaded && currentParagraph) {
+            playback.resume();
+          } else {
+            requestVisibleParagraph();
+          }
+        }}
+        onSeekBack={() => handleSeekBy(-10)}
+        onSeekForward={() => handleSeekBy(10)}
+        onSpeedDown={() => handleSpeedChange(previousTtsSpeed(ttsPrefs.speed))}
+        onSpeedUp={() => handleSpeedChange(nextTtsSpeed(ttsPrefs.speed))}
+      />
       <ReaderPreferenceApplier
         fontSize={activePreferences.fontSize}
         themeId={activePreferences.themeId}
@@ -281,9 +562,18 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
         visible={settingsVisible}
         fontSize={activePreferences.fontSize}
         themeId={activePreferences.themeId}
+        apiKey={apiKey}
+        voices={voices}
+        voiceLoading={voiceLoading}
+        selectedVoiceId={ttsPrefs.selectedVoice?.voiceId}
+        selectedVoiceName={ttsPrefs.selectedVoice?.voiceName}
+        ttsError={ttsError}
         onClose={() => setSettingsVisible(false)}
+        onApiKeyChange={handleApiKeyChange}
         onFontSizeChange={(fontSize) => updatePreferences({ fontSize })}
+        onLoadVoices={loadVoices}
         onThemeChange={(themeId) => updatePreferences({ themeId })}
+        onVoiceSelect={(voice) => void saveVoice(voice)}
       />
       <TocModal
         visible={tocVisible}
@@ -294,124 +584,70 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
   );
 }
 
-type PageTurnDirection = 'next' | 'previous';
-
-function PageTurnBar({ themeId }: { themeId: ReaderThemeId }) {
-  const { injectJavascript, atStart, atEnd, progress } = useReader();
+function TtsControlBar({
+  themeId,
+  loading,
+  playing,
+  loaded,
+  speed,
+  error,
+  onPlayPause,
+  onSeekBack,
+  onSeekForward,
+  onSpeedDown,
+  onSpeedUp,
+}: {
+  themeId: ReaderThemeId;
+  loading: boolean;
+  playing: boolean;
+  loaded: boolean;
+  speed: TtsSpeed;
+  error: string | null;
+  onPlayPause: () => void;
+  onSeekBack: () => void;
+  onSeekForward: () => void;
+  onSpeedDown: () => void;
+  onSpeedUp: () => void;
+}) {
   const activeTheme = READER_THEMES[themeId];
-  const progressPercent = normalizeProgress(progress);
-  const turnPrevious = useCallback(() => {
-    injectJavascript(createSpineSafePageTurnScript('previous'));
-  }, [injectJavascript]);
-  const turnNext = useCallback(() => {
-    injectJavascript(createSpineSafePageTurnScript('next'));
-  }, [injectJavascript]);
 
   return (
-    <View
-      style={[
-        styles.pageTurnBar,
-        {
-          backgroundColor: activeTheme.colors.background,
-          borderTopColor: activeTheme.colors.border,
-        },
-      ]}
-    >
-      <Pressable
-        accessibilityLabel="Previous page"
-        disabled={atStart}
-        hitSlop={8}
-        onPress={turnPrevious}
-        style={({ pressed }) => [
-          styles.pageTurnButton,
-          pressed && !atStart && { backgroundColor: activeTheme.colors.pressed },
-          atStart && styles.disabledControl,
-        ]}
-      >
-        <Ionicons name="chevron-back" size={17} color={atStart ? activeTheme.colors.mutedText : activeTheme.colors.text} />
-      </Pressable>
-
-      <View style={[styles.pageTurnProgressTrack, { backgroundColor: activeTheme.colors.border }]}>
-        <View
-          style={[
-            styles.pageTurnProgressFill,
-            { backgroundColor: activeTheme.colors.control, width: `${progressPercent}%` },
-          ]}
-        />
+    <View style={[styles.ttsBar, { backgroundColor: activeTheme.colors.background, borderTopColor: activeTheme.colors.border }]}>
+      <View style={styles.ttsControlsRow}>
+        <Pressable accessibilityLabel="Decrease narration speed" hitSlop={8} onPress={onSpeedDown} style={styles.ttsSmallButton}>
+          <Ionicons name="remove" size={18} color={activeTheme.colors.text} />
+        </Pressable>
+        <Text style={[styles.ttsSpeedLabel, { color: activeTheme.colors.text }]}>{formatTtsSpeed(speed)}</Text>
+        <Pressable accessibilityLabel="Increase narration speed" hitSlop={8} onPress={onSpeedUp} style={styles.ttsSmallButton}>
+          <Ionicons name="add" size={18} color={activeTheme.colors.text} />
+        </Pressable>
+        <Pressable accessibilityLabel="Rewind 10 seconds" disabled={!loaded} hitSlop={8} onPress={onSeekBack} style={[styles.ttsButton, !loaded && styles.disabledControl]}>
+          <Ionicons name="play-back" size={22} color={activeTheme.colors.text} />
+        </Pressable>
+        <Pressable
+          accessibilityLabel={playing ? 'Pause narration' : 'Play narration'}
+          disabled={loading}
+          hitSlop={8}
+          onPress={onPlayPause}
+          style={[styles.ttsPlayButton, { backgroundColor: activeTheme.colors.control }]}
+        >
+          {loading ? (
+            <ActivityIndicator color={activeTheme.colors.controlText} />
+          ) : (
+            <Ionicons name={playing ? 'pause' : 'play'} size={24} color={activeTheme.colors.controlText} />
+          )}
+        </Pressable>
+        <Pressable accessibilityLabel="Forward 10 seconds" disabled={!loaded} hitSlop={8} onPress={onSeekForward} style={[styles.ttsButton, !loaded && styles.disabledControl]}>
+          <Ionicons name="play-forward" size={22} color={activeTheme.colors.text} />
+        </Pressable>
       </View>
-
-      <Pressable
-        accessibilityLabel="Next page"
-        disabled={atEnd}
-        hitSlop={8}
-        onPress={turnNext}
-        style={({ pressed }) => [
-          styles.pageTurnButton,
-          pressed && !atEnd && { backgroundColor: activeTheme.colors.pressed },
-          atEnd && styles.disabledControl,
-        ]}
-      >
-        <Ionicons name="chevron-forward" size={17} color={atEnd ? activeTheme.colors.mutedText : activeTheme.colors.text} />
-      </Pressable>
+      {error ? (
+        <Text style={[styles.ttsError, { color: activeTheme.colors.mutedText }]} numberOfLines={2}>
+          {error}
+        </Text>
+      ) : null}
     </View>
   );
-}
-
-function createSpineSafePageTurnScript(direction: PageTurnDirection): string {
-  const action = direction === 'next' ? 'next' : 'prev';
-  const spineStep = direction === 'next' ? 1 : -1;
-
-  return `
-    (function () {
-      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-      const currentLocation = () => rendition && rendition.currentLocation ? rendition.currentLocation() : null;
-      const startCfi = (location) => location && location.start ? location.start.cfi : null;
-      const startIndex = (location) =>
-        location && location.start && typeof location.start.index === 'number'
-          ? location.start.index
-          : null;
-
-      (async function () {
-        let relocated = false;
-        if (rendition && rendition.once) {
-          rendition.once('relocated', function () {
-            relocated = true;
-          });
-        }
-
-        const before = currentLocation();
-        const beforeCfi = startCfi(before);
-        const beforeIndex = startIndex(before);
-        const result = rendition.${action}();
-
-        if (result && typeof result.then === 'function') {
-          await result.catch(function () {});
-        }
-
-        await wait(350);
-
-        const after = currentLocation();
-        const afterCfi = startCfi(after);
-        if (relocated || (beforeCfi && afterCfi && beforeCfi !== afterCfi)) return;
-
-        const index = beforeIndex !== null ? beforeIndex : startIndex(after);
-        if (index === null || !book || !book.spine || !rendition || !rendition.display) return;
-
-        const section = book.spine.get(index + ${spineStep});
-        if (section && section.href) {
-          rendition.display(section.href);
-        }
-      })().catch(function () {});
-    })();
-    true;
-  `;
-}
-
-function normalizeProgress(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-
-  const percent = value <= 1 ? value * 100 : value;
-  return Math.min(100, Math.max(0, percent));
 }
 
 function ReaderPreferenceApplier({
@@ -430,7 +666,7 @@ function ReaderPreferenceApplier({
     const appliedKey = `${themeId}:${fontSize}`;
     if (appliedKeyRef.current === appliedKey) return;
 
-    changeTheme(READER_THEMES[themeId].theme);
+    changeTheme(readerThemeForPreferences({ fontSize, themeId }));
     changeFontSize(fontSizePercent(fontSize));
     appliedKeyRef.current = appliedKey;
   }, [changeFontSize, changeTheme, fontSize, isLoading, isRendering, themeId]);
@@ -442,16 +678,34 @@ function ReaderSettingsModal({
   visible,
   fontSize,
   themeId,
+  apiKey,
+  voices,
+  voiceLoading,
+  selectedVoiceId,
+  selectedVoiceName,
+  ttsError,
   onClose,
+  onApiKeyChange,
   onFontSizeChange,
+  onLoadVoices,
   onThemeChange,
+  onVoiceSelect,
 }: {
   visible: boolean;
   fontSize: number;
   themeId: ReaderThemeId;
+  apiKey: string;
+  voices: ElevenLabsVoice[];
+  voiceLoading: boolean;
+  selectedVoiceId?: string;
+  selectedVoiceName?: string;
+  ttsError: string | null;
   onClose: () => void;
+  onApiKeyChange: (apiKey: string) => void;
   onFontSizeChange: (fontSize: number) => void;
+  onLoadVoices: () => void;
   onThemeChange: (themeId: ReaderThemeId) => void;
+  onVoiceSelect: (voice: ElevenLabsVoice) => void;
 }) {
   const activeTheme = READER_THEMES[themeId];
   const canDecrease = fontSize > READER_FONT_SIZE_MIN;
@@ -531,6 +785,48 @@ function ReaderSettingsModal({
                   </Pressable>
                 );
               })}
+            </View>
+          </View>
+
+          <View style={styles.settingsSection}>
+            <Text style={[styles.settingLabel, { color: activeTheme.colors.mutedText }]}>Text-to-Speech</Text>
+            <TextInput
+              value={apiKey}
+              onChangeText={onApiKeyChange}
+              placeholder="ElevenLabs API key"
+              placeholderTextColor={activeTheme.colors.mutedText}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={[styles.apiKeyInput, { color: activeTheme.colors.text, borderColor: activeTheme.colors.border }]}
+            />
+            <TouchableOpacity onPress={onLoadVoices} disabled={voiceLoading || !apiKey.trim()} style={[styles.loadVoicesButton, { backgroundColor: activeTheme.colors.control }, (voiceLoading || !apiKey.trim()) && styles.disabledControl]}>
+              {voiceLoading ? (
+                <ActivityIndicator color={activeTheme.colors.controlText} />
+              ) : (
+                <Text style={[styles.loadVoicesText, { color: activeTheme.colors.controlText }]}>Load voices</Text>
+              )}
+            </TouchableOpacity>
+            {selectedVoiceName ? (
+              <Text style={[styles.selectedVoiceText, { color: activeTheme.colors.mutedText }]}>Selected: {selectedVoiceName}</Text>
+            ) : null}
+            {ttsError ? (
+              <Text style={[styles.ttsSettingsError, { color: activeTheme.colors.mutedText }]}>{ttsError}</Text>
+            ) : null}
+            <View style={styles.voiceList}>
+              {voices.map((voice) => (
+                <Pressable
+                  key={voice.voice_id}
+                  onPress={() => onVoiceSelect(voice)}
+                  style={({ pressed }) => [
+                    styles.voiceRow,
+                    { borderColor: activeTheme.colors.border, backgroundColor: pressed ? activeTheme.colors.pressed : activeTheme.colors.background },
+                  ]}
+                >
+                  <Text style={[styles.voiceName, { color: activeTheme.colors.text }]}>{voice.name}</Text>
+                  {voice.voice_id === selectedVoiceId ? <Ionicons name="checkmark" size={20} color={activeTheme.colors.text} /> : null}
+                </Pressable>
+              ))}
             </View>
           </View>
         </View>
@@ -624,25 +920,49 @@ const styles = StyleSheet.create({
   readerArea: { flex: 1 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   headerButton: { paddingHorizontal: 8, paddingVertical: 4 },
-  pageTurnBar: {
-    height: 30,
+  ttsBar: {
+    minHeight: 58,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    gap: 4,
+  },
+  ttsControlsRow: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
-    borderTopWidth: StyleSheet.hairlineWidth,
+    justifyContent: 'center',
+    gap: 10,
   },
-  pageTurnButton: {
-    width: 44,
-    height: '100%',
+  ttsButton: {
+    width: 42,
+    height: 42,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pageTurnProgressTrack: {
-    flex: 1,
-    height: 2,
-    borderRadius: 1,
-    overflow: 'hidden',
+  ttsSmallButton: {
+    width: 32,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  pageTurnProgressFill: { height: '100%' },
+  ttsPlayButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ttsSpeedLabel: {
+    minWidth: 34,
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  ttsError: {
+    textAlign: 'center',
+    fontSize: 12,
+  },
   errorTitle: { fontSize: 18, fontWeight: '600', color: '#222' },
   errorMessage: { fontSize: 14, color: '#777', textAlign: 'center' },
   backButton: {
@@ -692,6 +1012,35 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   disabledControl: { opacity: 0.35 },
+  apiKeyInput: {
+    minHeight: 46,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    fontSize: 15,
+  },
+  loadVoicesButton: {
+    alignSelf: 'flex-start',
+    minHeight: 42,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadVoicesText: { fontSize: 15, fontWeight: '700' },
+  selectedVoiceText: { fontSize: 13 },
+  ttsSettingsError: { fontSize: 13 },
+  voiceList: { gap: 8 },
+  voiceRow: {
+    minHeight: 46,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  voiceName: { fontSize: 15, fontWeight: '600' },
   themeList: { gap: 10 },
   themeRow: {
     minHeight: 52,

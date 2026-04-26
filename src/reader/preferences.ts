@@ -104,6 +104,19 @@ export function fontSizePercent(size: number): `${number}%` {
   return `${clampReaderFontSize(size)}%`;
 }
 
+export function readerThemeForPreferences({ fontSize, themeId }: ReaderPreferences): Theme {
+  const theme = READER_THEMES[themeId].theme;
+  const body = theme.body ?? {};
+
+  return {
+    ...theme,
+    body: {
+      ...body,
+      'font-size': `${fontSizePercent(fontSize)} !important`,
+    },
+  };
+}
+
 function createReaderTheme(background: string, text: string, selection: string): Theme {
   const textRule = { color: `${text} !important` };
 
