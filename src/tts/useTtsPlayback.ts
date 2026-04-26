@@ -70,6 +70,7 @@ export function useTtsPlayback() {
 
   const replacePlayerSource = useCallback(
     (source: string | null) => {
+      if (!source) return;
       try {
         player.replace(source);
       } catch (error) {
@@ -95,10 +96,9 @@ export function useTtsPlayback() {
     if (!uri) return;
 
     pausePlayer();
-    replacePlayerSource(null);
     currentUriRef.current = null;
     await deleteTempFile(uri);
-  }, [deleteTempFile, pausePlayer, replacePlayerSource]);
+  }, [deleteTempFile, pausePlayer]);
 
   const loadAndPlay = useCallback(
     async ({ audioBase64, speed }: LoadClipParams) => {

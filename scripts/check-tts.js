@@ -102,6 +102,7 @@ assert(
 assert(
   reader.includes('onWebViewMessage={handleTtsWebViewMessage}') &&
     reader.includes('createRequestVisibleParagraphScript') &&
+    reader.includes('createRequestSelectedParagraphScript') &&
     reader.includes('generateSpeech') &&
     !reader.includes('fetchVoices') &&
     !reader.includes('placeholder="ElevenLabs API key"'),
@@ -129,6 +130,19 @@ assertIncludes(
   ttsControlBarBlock,
   'onSpeedSelect={handleSpeedChange}',
   'TTS control bar should expose direct speed selection in addition to plus/minus speed controls.'
+);
+assert(
+  reader.includes("label: 'Read aloud'") &&
+    reader.includes('menuItems={ttsMenuItems}') &&
+    reader.includes("pendingRequestRef.current = 'selected'") &&
+    reader.includes('createRequestSelectedParagraphScript(requestId, trimmedCfiRange)') &&
+    reader.includes('return false;'),
+  'Reader should expose a native selection menu action that keeps selection long enough to request TTS from the selected CFI range.'
+);
+assert(
+  !reader.includes("setTtsError('Could not find selected text.');") &&
+    reader.includes('const trimmedCfiRange = cfiRange.trim();'),
+  'Reader should allow empty menu CFI values so the bridge can fall back to the live EPUB selection.'
 );
 
 assertMatches(
@@ -174,10 +188,11 @@ assertIncludes(
   'unloadAndCleanupCurrentFile()',
   'stop should delegate to cleanup that detaches and deletes the current temp file.'
 );
-assertIncludes(
-  playback,
-  'replacePlayerSource(null)',
-  'Playback cleanup should detach the player source.'
+assert(
+  !playback.includes('player.replace(null)') &&
+    !playback.includes('replacePlayerSource(null)') &&
+    playback.includes('if (!source) return;'),
+  'Playback cleanup should not call player.replace(null), which fails in Expo Audio on iOS reload.'
 );
 assertIncludes(
   playback,
@@ -205,6 +220,20 @@ assertIncludes(
 );
 
 assertIncludes(bridgeRequestScriptBlock, 'const requestId =', 'Bridge request script should carry requestId.');
+assertIncludes(
+  bridge,
+  'export function createRequestSelectedParagraphScript',
+  'Bridge should export a selected-paragraph request script factory.'
+);
+assert(
+  bridgeRequestScriptBlock.includes("const selectedCfiRange = kind === 'selected'") &&
+    bridgeRequestScriptBlock.includes('content.range(selectedCfiRange)') &&
+    bridgeRequestScriptBlock.includes('content.window.getSelection()') &&
+    bridgeRequestScriptBlock.includes('content.cfiFromRange(selectionRange)') &&
+    bridgeRequestScriptBlock.includes('firstWordIndexAtOrAfterSelection') &&
+    bridgeRequestScriptBlock.includes('wordRanges.slice(selectedStartIndex)'),
+  'Bridge selected mode should locate either the selected CFI range or live EPUB selection and slice paragraph words from the selected word.'
+);
 assertIncludes(
   bridgeRequestScriptBlock,
   "const blockSelector = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,div,section,article,main,td,th,dd,dt';",

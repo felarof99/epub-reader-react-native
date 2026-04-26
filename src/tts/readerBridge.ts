@@ -1,4 +1,4 @@
-type ParagraphRequestKind = 'visible' | 'next';
+type ParagraphRequestKind = 'visible' | 'next' | 'selected';
 
 const BRIDGE_EVENT_TYPES = {
   paragraph: 'ttsParagraph',
@@ -12,6 +12,10 @@ export function createRequestVisibleParagraphScript(requestId: string): string {
 
 export function createRequestNextParagraphScript(requestId: string, currentParagraphId: string): string {
   return createParagraphRequestScript(requestId, 'next', currentParagraphId);
+}
+
+export function createRequestSelectedParagraphScript(requestId: string, cfiRange: string): string {
+  return createParagraphRequestScript(requestId, 'selected', cfiRange);
 }
 
 export function createHighlightWordScript(paragraphId: string, wordId: string): string {
@@ -72,13 +76,15 @@ export function createClearHighlightScript(): string {
 function createParagraphRequestScript(
   requestId: string,
   kind: ParagraphRequestKind,
-  currentParagraphId?: string,
+  referenceValue?: string,
 ): string {
   return `
     (function () {
       const requestId = ${JSON.stringify(requestId)};
       const kind = ${JSON.stringify(kind)};
-      const currentParagraphId = ${JSON.stringify(currentParagraphId ?? '')};
+      const referenceValue = ${JSON.stringify(referenceValue ?? '')};
+      const currentParagraphId = kind === 'next' ? referenceValue : '';
+      const selectedCfiRange = kind === 'selected' ? referenceValue : '';
       const blockSelector = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,div,section,article,main,td,th,dd,dt';
       const minTextLength = 2;
 
@@ -89,6 +95,43 @@ function createParagraphRequestScript(
       function getRenditionContents() {
         if (typeof rendition === 'undefined' || !rendition || !rendition.getContents) return [];
         return rendition.getContents();
+      }
+
+      function liveSelectedRangeForContent(content) {
+        if (!content || !content.window || typeof content.window.getSelection !== 'function') return null;
+        const selection = content.window.getSelection();
+        if (!selection || selection.rangeCount < 1) return null;
+        const selectionRange = selection.getRangeAt(0);
+        if (!selectionRange || selectionRange.collapsed) return null;
+        if (typeof content.cfiFromRange === 'function' && typeof content.range === 'function') {
+          try {
+            const liveCfiRange = content.cfiFromRange(selectionRange);
+            if (liveCfiRange) return content.range(liveCfiRange);
+          } catch (error) {
+            // Fall through to using the live DOM range.
+          }
+        }
+        return selectionRange;
+      }
+
+      function selectedRangeForContent(content) {
+        if (!content) return null;
+        if (selectedCfiRange && typeof content.range === 'function') {
+          try {
+            return content.range(selectedCfiRange);
+          } catch (error) {
+            // Fall through to the live WebView selection fallback.
+          }
+        }
+        return liveSelectedRangeForContent(content);
+      }
+
+      function clearLiveSelections(contents) {
+        contents.forEach(function (content) {
+          if (!content || !content.window || typeof content.window.getSelection !== 'function') return;
+          const selection = content.window.getSelection();
+          if (selection && typeof selection.removeAllRanges === 'function') selection.removeAllRanges();
+        });
       }
 
       function normalizeText(text) {
@@ -161,6 +204,31 @@ function createParagraphRequestScript(
         return ranges.map(function (range) { return range.text; }).join(' ');
       }
 
+      function rangeIntersectsElement(range, element) {
+        if (!range) return false;
+        try {
+          if (typeof range.intersectsNode === 'function' && range.intersectsNode(element)) return true;
+        } catch (error) {
+          // Fall through to container checks for WebKit edge cases.
+        }
+        return element.contains(range.startContainer) || element.contains(range.endContainer);
+      }
+
+      function firstWordIndexAtOrAfterSelection(wordRanges, selectedRange) {
+        if (!selectedRange) return 0;
+        for (let index = 0; index < wordRanges.length; index += 1) {
+          const rangeRecord = wordRanges[index];
+          const doc = rangeRecord.node.ownerDocument;
+          const wordRange = doc.createRange();
+          wordRange.setStart(rangeRecord.node, rangeRecord.startOffset);
+          wordRange.setEnd(rangeRecord.node, rangeRecord.endOffset);
+          const comparison = wordRange.compareBoundaryPoints(wordRange.END_TO_START, selectedRange);
+          if (wordRange.detach) wordRange.detach();
+          if (comparison > 0) return index;
+        }
+        return -1;
+      }
+
       function unwrapExistingWordMarkup(element) {
         Array.prototype.slice.call(element.querySelectorAll('[data-tts-word-id]')).forEach(function (node) {
           const parent = node.parentNode;
@@ -212,9 +280,15 @@ function createParagraphRequestScript(
         return candidate.bottom > 0 && candidate.top < viewportHeight;
       }
 
-      function candidateFromElement(contentIndex, content, element, elementIndex, startAtFirstVisibleWord) {
+      function candidateFromElement(contentIndex, content, element, elementIndex, startAtFirstVisibleWord, selectedRange) {
         if (hasNestedReadableBlock(element)) return null;
-        const wordRanges = wordRangesForElement(content, element, startAtFirstVisibleWord);
+        if (selectedRange && !rangeIntersectsElement(selectedRange, element)) return null;
+        let wordRanges = wordRangesForElement(content, element, startAtFirstVisibleWord);
+        if (selectedRange) {
+          const selectedStartIndex = firstWordIndexAtOrAfterSelection(wordRanges, selectedRange);
+          if (selectedStartIndex < 0) return null;
+          wordRanges = wordRanges.slice(selectedStartIndex);
+        }
         const text = textFromRanges(wordRanges);
         if (text.length < minTextLength) return null;
         const rect = element.getBoundingClientRect();
@@ -234,8 +308,17 @@ function createParagraphRequestScript(
         contents.forEach(function (content, contentIndex) {
           const doc = content.document;
           if (!doc) return;
+          const selectedRange = selectedRangeForContent(content);
+          if (kind === 'selected' && !selectedRange) return;
           Array.prototype.slice.call(doc.querySelectorAll(blockSelector)).forEach(function (element, elementIndex) {
-            const candidate = candidateFromElement(contentIndex, content, element, elementIndex, kind === 'visible');
+            const candidate = candidateFromElement(
+              contentIndex,
+              content,
+              element,
+              elementIndex,
+              kind === 'visible',
+              selectedRange
+            );
             if (candidate) candidates.push(candidate);
           });
         });
@@ -259,6 +342,8 @@ function createParagraphRequestScript(
             return;
           }
           selected = orderedCandidates[currentIndex + 1];
+        } else if (kind === 'selected') {
+          selected = candidates[0];
         } else {
           selected = candidates.find(isVisibleCandidate);
         }
@@ -269,6 +354,7 @@ function createParagraphRequestScript(
         }
 
         ensureWordMarkup(selected.element, selected.paragraphId, selected.wordRanges);
+        if (kind === 'selected') clearLiveSelections(contents);
         send({
           type: '${BRIDGE_EVENT_TYPES.paragraph}',
           requestId,
