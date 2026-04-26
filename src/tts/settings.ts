@@ -37,7 +37,7 @@ export async function saveApiKey(apiKey: string): Promise<void> {
 }
 
 export async function getSettings(): Promise<TtsSettings> {
-  return readSettings();
+  return readSettingsForDisplay();
 }
 
 export function saveSelectedVoice(selectedVoice: TtsVoiceSelection): Promise<TtsSettings> {
@@ -58,7 +58,7 @@ function enqueueSettingsUpdate(update: (settings: TtsSettings) => Partial<TtsSet
   let nextSettings: TtsSettings | undefined;
 
   const operation = settingsWriteQueue.then(async () => {
-    nextSettings = normalizeSettings(update(await readSettings()));
+    nextSettings = normalizeSettings(update(await readSettingsForWrite()));
     await saveSettings(nextSettings);
   });
 
@@ -72,17 +72,30 @@ function enqueueSettingsUpdate(update: (settings: TtsSettings) => Partial<TtsSet
   });
 }
 
-async function readSettings(): Promise<TtsSettings> {
+async function readSettingsForDisplay(): Promise<TtsSettings> {
   try {
     const raw = await AsyncStorage.getItem(SETTINGS_KEY);
     if (!raw) return DEFAULT_SETTINGS;
 
-    const parsed = JSON.parse(raw) as Partial<TtsSettings>;
-    return normalizeSettings(parsed);
+    return parseStoredSettings(raw);
   } catch (error) {
     console.warn('ttsSettings.getSettings failed', error);
     return DEFAULT_SETTINGS;
   }
+}
+
+async function readSettingsForWrite(): Promise<TtsSettings> {
+  let raw: string | null;
+
+  try {
+    raw = await AsyncStorage.getItem(SETTINGS_KEY);
+  } catch (error) {
+    console.warn('ttsSettings.readSettingsForWrite failed', error);
+    throw error;
+  }
+
+  if (!raw) return DEFAULT_SETTINGS;
+  return parseStoredSettings(raw);
 }
 
 async function saveSettings(settings: TtsSettings): Promise<void> {
@@ -91,6 +104,15 @@ async function saveSettings(settings: TtsSettings): Promise<void> {
   } catch (error) {
     console.warn('ttsSettings.saveSettings failed', error);
     throw error;
+  }
+}
+
+function parseStoredSettings(raw: string): TtsSettings {
+  try {
+    return normalizeSettings(JSON.parse(raw) as Partial<TtsSettings>);
+  } catch (error) {
+    console.warn('ttsSettings.parseStoredSettings failed', error);
+    return DEFAULT_SETTINGS;
   }
 }
 
