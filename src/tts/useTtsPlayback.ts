@@ -65,11 +65,11 @@ export function useTtsPlayback() {
 
   const seekBy = useCallback(
     async (seconds: number) => {
-      const duration = Number.isFinite(status.duration) ? status.duration : 0;
-      const nextTime = Math.min(
-        Math.max(status.currentTime + seconds, 0),
-        duration || status.currentTime + seconds
-      );
+      const requestedTime = Math.max(status.currentTime + seconds, 0);
+      const nextTime =
+        Number.isFinite(status.duration) && status.duration > 0
+          ? Math.min(requestedTime, status.duration)
+          : requestedTime;
       await player.seekTo(nextTime);
     },
     [player, status.currentTime, status.duration]
