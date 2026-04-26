@@ -1,0 +1,4 @@
+# Allow project specs (overrides ~/.gitignore_global which ignores .llm/)
+!.llm/
+.llm/*
+!.llm/specs/
