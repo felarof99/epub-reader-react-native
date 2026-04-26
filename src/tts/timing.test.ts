@@ -3,13 +3,36 @@ import assert from 'node:assert/strict';
 
 import {
   activeWordIdAtTime,
+  formatTtsSpeed,
+  isTtsSpeed,
   mapAlignmentToWordTimings,
   nextTtsSpeed,
+  normalizeTtsSpeed,
   previousTtsSpeed,
 } from './timing';
 import type { ElevenLabsAlignment, TtsWord } from './types';
 
 describe('TTS speed helpers', () => {
+  it('identifies allowed speeds', () => {
+    assert.equal(isTtsSpeed(1), true);
+    assert.equal(isTtsSpeed(1.5), true);
+    assert.equal(isTtsSpeed(2), true);
+    assert.equal(isTtsSpeed(0.5), false);
+    assert.equal(isTtsSpeed('1'), false);
+  });
+
+  it('normalizes unknown speed values to the default speed', () => {
+    assert.equal(normalizeTtsSpeed(1.5), 1.5);
+    assert.equal(normalizeTtsSpeed(0.75), 1);
+    assert.equal(normalizeTtsSpeed(undefined), 1);
+  });
+
+  it('formats speeds with an x suffix', () => {
+    assert.equal(formatTtsSpeed(1), '1x');
+    assert.equal(formatTtsSpeed(1.5), '1.5x');
+    assert.equal(formatTtsSpeed(2), '2x');
+  });
+
   it('steps up through the allowed speeds', () => {
     assert.equal(nextTtsSpeed(1), 1.5);
     assert.equal(nextTtsSpeed(1.5), 2);
@@ -42,10 +65,41 @@ describe('ElevenLabs character timing mapping', () => {
     ]);
   });
 
-  it('finds the active word for a playback time', () => {
+  it('skips invalid and out-of-range word offsets', () => {
+    const invalidWords: TtsWord[] = [
+      { id: 'negative-start', text: 'Bad', startOffset: -1, endOffset: 2 },
+      { id: 'empty-range', text: 'Bad', startOffset: 2, endOffset: 2 },
+      { id: 'reversed-range', text: 'Bad', startOffset: 4, endOffset: 3 },
+      { id: 'start-too-late', text: 'Bad', startOffset: 12, endOffset: 13 },
+      { id: 'end-too-late', text: 'Bad', startOffset: 10, endOffset: 13 },
+      { id: 'valid', text: 'reader', startOffset: 6, endOffset: 12 },
+    ];
+
+    assert.deepEqual(mapAlignmentToWordTimings(alignment, invalidWords), [
+      { wordId: 'valid', startTime: 0.4, endTime: 0.8 },
+    ]);
+  });
+
+  it('returns undefined before playback reaches the first word', () => {
     const timings = mapAlignmentToWordTimings(alignment, words);
-    assert.equal(activeWordIdAtTime(timings, 0.01), 'w0');
-    assert.equal(activeWordIdAtTime(timings, 0.5), 'w1');
+    assert.equal(activeWordIdAtTime(timings, -0.01), undefined);
+  });
+
+  it('keeps the previous word active between word timing windows', () => {
+    const timings = mapAlignmentToWordTimings(alignment, words);
+    assert.equal(activeWordIdAtTime(timings, 0.3), 'w0');
+  });
+
+  it('treats timing window boundaries as active', () => {
+    const timings = mapAlignmentToWordTimings(alignment, words);
+    assert.equal(activeWordIdAtTime(timings, 0), 'w0');
+    assert.equal(activeWordIdAtTime(timings, 0.25), 'w0');
+    assert.equal(activeWordIdAtTime(timings, 0.4), 'w1');
+    assert.equal(activeWordIdAtTime(timings, 0.8), 'w1');
+  });
+
+  it('keeps the final word active after its timing window', () => {
+    const timings = mapAlignmentToWordTimings(alignment, words);
     assert.equal(activeWordIdAtTime(timings, 1.2), 'w1');
   });
 });

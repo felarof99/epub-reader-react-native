@@ -33,10 +33,17 @@ export function mapAlignmentToWordTimings(
   if (starts.length === 0 || ends.length === 0) return [];
 
   return words.flatMap((word) => {
-    const startIndex = Math.min(word.startOffset, starts.length - 1);
-    const endIndex = Math.min(Math.max(word.endOffset - 1, startIndex), ends.length - 1);
-    const startTime = starts[startIndex];
-    const endTime = ends[endIndex];
+    if (
+      word.startOffset < 0 ||
+      word.endOffset <= word.startOffset ||
+      word.startOffset >= starts.length ||
+      word.endOffset > ends.length
+    ) {
+      return [];
+    }
+
+    const startTime = starts[word.startOffset];
+    const endTime = ends[word.endOffset - 1];
 
     if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return [];
 
@@ -50,10 +57,11 @@ export function mapAlignmentToWordTimings(
 
 export function activeWordIdAtTime(timings: WordTiming[], currentTime: number): string | undefined {
   if (timings.length === 0) return undefined;
+  if (currentTime < timings[0].startTime) return undefined;
 
   const exact = timings.find((timing) => currentTime >= timing.startTime && currentTime <= timing.endTime);
   if (exact) return exact.wordId;
 
   const previous = [...timings].reverse().find((timing) => timing.startTime <= currentTime);
-  return previous?.wordId ?? timings[0].wordId;
+  return previous?.wordId;
 }
