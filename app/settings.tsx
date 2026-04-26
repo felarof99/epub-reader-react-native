@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Stack } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -30,7 +30,14 @@ export default function SettingsScreen() {
   const [previewLoadingVoiceId, setPreviewLoadingVoiceId] = useState<string | null>(null);
   const [previewVoiceId, setPreviewVoiceId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
   const { isPlaying, loadAndPlay, stop } = useTtsPlayback();
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,11 +77,12 @@ export default function SettingsScreen() {
     setVoiceLoading(true);
     setError(null);
     try {
-      setVoices(await fetchVoices(trimmedApiKey));
+      const loadedVoices = await fetchVoices(trimmedApiKey);
+      if (mountedRef.current) setVoices(loadedVoices);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Could not load voices.');
+      if (mountedRef.current) setError(loadError instanceof Error ? loadError.message : 'Could not load voices.');
     } finally {
-      setVoiceLoading(false);
+      if (mountedRef.current) setVoiceLoading(false);
     }
   }, [apiKey]);
 
@@ -84,10 +92,11 @@ export default function SettingsScreen() {
         voiceId: voice.voice_id,
         voiceName: voice.name,
       });
+      if (!mountedRef.current) return;
       setSettings(nextSettings);
       setError(null);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Could not save selected voice.');
+      if (mountedRef.current) setError(saveError instanceof Error ? saveError.message : 'Could not save selected voice.');
     }
   }, []);
 
@@ -95,10 +104,11 @@ export default function SettingsScreen() {
     if (previewVoiceId === voice.voice_id && isPlaying) {
       try {
         await stop();
+        if (!mountedRef.current) return;
         setPreviewVoiceId(null);
         setError(null);
       } catch (stopError) {
-        setError(stopError instanceof Error ? stopError.message : 'Could not stop voice preview.');
+        if (mountedRef.current) setError(stopError instanceof Error ? stopError.message : 'Could not stop voice preview.');
       }
       return;
     }
@@ -117,12 +127,14 @@ export default function SettingsScreen() {
         voiceId: voice.voice_id,
         text: SAMPLE_PREVIEW_TEXT,
       });
+      if (!mountedRef.current) return;
       await loadAndPlay({ audioBase64: speech.audio_base64, speed: settings.speed });
+      if (!mountedRef.current) return;
       setPreviewVoiceId(voice.voice_id);
     } catch (previewError) {
-      setError(previewError instanceof Error ? previewError.message : 'Could not play voice preview.');
+      if (mountedRef.current) setError(previewError instanceof Error ? previewError.message : 'Could not play voice preview.');
     } finally {
-      setPreviewLoadingVoiceId(null);
+      if (mountedRef.current) setPreviewLoadingVoiceId(null);
     }
   }, [apiKey, isPlaying, loadAndPlay, previewVoiceId, settings.speed, stop]);
 
