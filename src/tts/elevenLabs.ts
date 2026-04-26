@@ -1,11 +1,14 @@
 import type { ElevenLabsSpeechResponse, ElevenLabsVoice } from './types';
 
-const BASE_URL = 'https://api.elevenlabs.io/v1';
+const API_BASE_URL = 'https://api.elevenlabs.io';
 const DEFAULT_MODEL_ID = 'eleven_flash_v2_5';
 const DEFAULT_OUTPUT_FORMAT = 'mp3_44100_128';
+const VOICES_PAGE_SIZE = 100;
 
 type VoicesResponse = {
-  voices: ElevenLabsVoice[];
+  voices?: unknown;
+  has_more?: unknown;
+  next_page_token?: unknown;
 };
 
 export type GenerateSpeechParams = {
@@ -21,18 +24,33 @@ export function sortVoicesByName(voices: ElevenLabsVoice[]): ElevenLabsVoice[] {
 }
 
 export async function fetchVoices(apiKey: string): Promise<ElevenLabsVoice[]> {
-  const response = await fetch(`${BASE_URL}/voices`, {
-    headers: {
-      'xi-api-key': apiKey,
-    },
-  });
+  const voices: ElevenLabsVoice[] = [];
+  let nextPageToken: string | undefined;
 
-  if (!response.ok) {
-    throw new Error(await extractElevenLabsErrorMessage(response.status, await response.text()));
-  }
+  do {
+    const url = new URL(`${API_BASE_URL}/v2/voices`);
+    url.searchParams.set('page_size', String(VOICES_PAGE_SIZE));
+    if (nextPageToken) url.searchParams.set('next_page_token', nextPageToken);
 
-  const data = (await response.json()) as VoicesResponse;
-  return sortVoicesByName(data.voices ?? []);
+    const response = await fetch(url.toString(), {
+      headers: {
+        'xi-api-key': apiKey,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractElevenLabsErrorMessage(response.status, await response.text()));
+    }
+
+    const data = (await response.json()) as VoicesResponse;
+    voices.push(...extractVoices(data));
+    nextPageToken =
+      data.has_more === true && typeof data.next_page_token === 'string' && data.next_page_token.trim()
+        ? data.next_page_token
+        : undefined;
+  } while (nextPageToken);
+
+  return sortVoicesByName(voices);
 }
 
 export async function generateSpeech({
@@ -42,7 +60,7 @@ export async function generateSpeech({
   previousText,
   nextText,
 }: GenerateSpeechParams): Promise<ElevenLabsSpeechResponse> {
-  const url = `${BASE_URL}/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=${DEFAULT_OUTPUT_FORMAT}`;
+  const url = `${API_BASE_URL}/v1/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=${DEFAULT_OUTPUT_FORMAT}`;
   const body: Record<string, unknown> = {
     text,
     model_id: DEFAULT_MODEL_ID,
@@ -70,7 +88,8 @@ export async function generateSpeech({
     throw new Error(await extractElevenLabsErrorMessage(response.status, await response.text()));
   }
 
-  return (await response.json()) as ElevenLabsSpeechResponse;
+  const data = (await response.json()) as unknown;
+  return extractSpeechResponse(data);
 }
 
 export async function extractElevenLabsErrorMessage(statusCode: number, rawBody: string): Promise<string> {
@@ -78,6 +97,17 @@ export async function extractElevenLabsErrorMessage(statusCode: number, rawBody:
 
   if (parsed && typeof parsed === 'object') {
     const detail = (parsed as { detail?: unknown }).detail;
+    if (Array.isArray(detail)) {
+      const validationMessage = detail
+        .map((item) => {
+          if (!item || typeof item !== 'object') return undefined;
+          const message = (item as { msg?: unknown }).msg;
+          return typeof message === 'string' && message.trim() ? message : undefined;
+        })
+        .find((message) => message);
+      if (validationMessage) return validationMessage;
+    }
+
     if (detail && typeof detail === 'object') {
       const detailObject = detail as { status?: unknown; message?: unknown };
       if (detailObject.status === 'quota_exceeded') {
@@ -112,4 +142,20 @@ function safeJson(value: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+function extractVoices(data: VoicesResponse): ElevenLabsVoice[] {
+  if (!Array.isArray(data.voices)) {
+    throw new Error('Invalid ElevenLabs voices response: expected voices to be an array.');
+  }
+
+  return data.voices as ElevenLabsVoice[];
+}
+
+function extractSpeechResponse(data: unknown): ElevenLabsSpeechResponse {
+  if (!data || typeof data !== 'object' || typeof (data as { audio_base64?: unknown }).audio_base64 !== 'string') {
+    throw new Error('Invalid ElevenLabs speech response: expected audio_base64 to be a string.');
+  }
+
+  return data as ElevenLabsSpeechResponse;
 }
