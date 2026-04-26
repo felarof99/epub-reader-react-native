@@ -9,7 +9,7 @@
 
 ## Goal
 
-Add a one-handed, phone-friendly highlighting system to the existing EPUB reader. The author reads on a phone with their thumb, and native long-press text selection is awkward — so we replace it with a **right-rail of round checkboxes**, one per sentence, that the user taps to build a multi-sentence selection. A persistent bottom bar (built separately) picks one of four colors (cyan / green / yellow / red) and optionally attaches a text note. Highlights are CFI-anchored and persist locally per book.
+Add a one-handed, phone-friendly highlighting system to the existing EPUB reader. The author reads on a phone with their thumb, and native long-press text selection is awkward, so v1 uses a **bottom-bar note-taking mode**. In normal reading, the page stays clean. When the user taps the note button in the bottom bar, audio playback pauses, right-rail dots appear beside selectable text chunks, and the user taps a start dot plus an end dot to build a contiguous selection. The same bottom bar then exposes four colors (cyan / green / yellow / red) and a note text box. Highlights are CFI-anchored and persist locally per book.
 
 ## Non-goals (v1)
 
@@ -23,7 +23,7 @@ Each is a clean follow-on, deliberately deferred. The architecture in this spec 
 - **Undo / history of highlights.**
 - **Color customization.** Four fixed colors in v1.
 - **Smart (NLP) sentence detection.** A regex split is the v1 floor; refinement is a follow-up tuning task, not a release blocker.
-- **Bottom-bar visual design.** The user is building the bar; this spec defines only the API contract it consumes.
+- **Full TTS implementation.** The note-mode contract pauses audio through a callback, but TTS generation/playback is covered by the separate ElevenLabs TTS spec.
 
 ## Stack additions
 
@@ -95,8 +95,11 @@ The API the bottom bar consumes. Lives in React Native, provided at the reader s
 
 ```ts
 type SelectionAPI = {
+  noteMode: boolean;
+  setNoteMode: (enabled: boolean) => void;               // entering note mode pauses audio and shows rail dots
   selectedCount: number;                                 // 0 when empty
   hasSelection: boolean;                                 // selectedCount > 0
+  selectedText: string;                                  // text for the current contiguous selection
   applyColor: (color: HighlightColor) => Promise<void>;  // colors → save → clear pending
   saveNote: (text: string) => Promise<void>;             // last-picked color (default yellow) + note
   erase: () => Promise<void>;                            // remove overlapping highlights, clear pending
@@ -110,9 +113,10 @@ export const useHighlightSelection = () => useContext(SelectionContext);
 The bottom bar reads this context to decide enabled state and to wire button taps:
 
 ```tsx
-const { hasSelection, applyColor, saveNote, erase } = useHighlightSelection();
+const { noteMode, setNoteMode, hasSelection, selectedText, applyColor, saveNote, erase } = useHighlightSelection();
 // disable swatches when !hasSelection
 // onPress={() => applyColor('yellow')}
+// onPress note mode: setNoteMode(!noteMode)
 ```
 
 The bar **never touches the WebView, never sees CFIs, never imports the highlights module.** Clean separation.
@@ -122,11 +126,12 @@ The bar **never touches the WebView, never sees CFIs, never imports the highligh
 Helpers for the message protocol between the injected DOM and React Native.
 
 Messages from WebView to RN:
-- `{ type: 'selection-changed', sentenceIds: string[], cfiRanges: string[] }` — fired on every tap.
+- `{ type: 'selection-changed', sentenceIds: string[], cfiRanges: string[], selectedText: string }` — fired on every note-mode rail tap.
 - `{ type: 'rail-ready', sectionHref: string, sentenceCount: number }` — fired after the rail is injected for a chapter (debug/observability).
 - `{ type: 'log', level, message }` — passthrough for in-WebView errors.
 
 Messages from RN to WebView:
+- `{ type: 'set-note-mode', enabled }` — show/hide the rail dots.
 - `{ type: 'apply-highlight', id, cfiRange, color }` — color the rail checkboxes; epub.js handles the text decoration via `rendition.annotations.add` from the RN side.
 - `{ type: 'remove-highlight', id, cfiRange }` — clear the colored fill on the affected checkboxes.
 - `{ type: 'clear-pending' }` — visually deselect after a save or cancel.
@@ -139,15 +144,16 @@ Runs on every `rendition.on('rendered', section => …)` callback. The reader's 
 
 **CFI per sentence.** For each `.hl-sent`, build a DOM Range covering its text and call `contents.cfiFromRange(range)` to get a stable CFI. Cache on the element: `dataset.cfi`.
 
-**Rail rendering.** A 28px-wide right-margin column (`position: absolute; right: 0; top: 0; height: 100%; pointer-events: none;` on the column, `pointer-events: auto;` on each checkbox). For each `.hl-sent`, create a 14px circular `<button class="hl-cbox" data-sid="…">` and align its top to `.hl-sent.getBoundingClientRect().top` of its first line.
+**Rail rendering.** A 28px-wide right-margin column (`position: absolute; right: 0; top: 0; height: 100%; pointer-events: none;` on the column, `pointer-events: auto;` on each dot). The rail is hidden unless note mode is enabled. For each selectable text chunk, create a 14px circular `<button class="hl-cbox" data-sid="…">` and align its top to `.hl-sent.getBoundingClientRect().top` of its first line.
 
 **Reflow.** A `ResizeObserver` on the chapter root re-aligns checkbox tops when font-size or viewport changes. Annotations from epub.js re-render automatically; the rail just needs y-realignment.
 
 **Tap behavior.**
-- Empty checkbox → toggle to `pending` (gray fill, `class="pending"`).
-- Pending checkbox → toggle off pending.
-- Already-highlighted checkbox → adds to pending while keeping its color fill (border becomes dashed gray to show it's both highlighted and selected).
-- Each tap re-emits `selection-changed` with the current set of pending sentence IDs and their CFI ranges, **grouped into contiguous runs**. Tapping sentences 3, 4, 5, 9, 10 emits two ranges (3–5 and 9–10), not one. This way each contiguous run becomes its own highlight when a color is applied.
+- Note mode off → rail dots are hidden and taps do nothing.
+- Note mode on, no anchor → tapping a dot starts a selection at that chunk.
+- Note mode on, anchor exists → tapping another dot selects every chunk between anchor and target.
+- Tapping the selected anchor again clears the pending selection.
+- Each tap re-emits `selection-changed` with the current selected IDs, a CFI range for the contiguous selection, and the selected plain text. The bottom bar uses this to enable swatches and show the note text box.
 
 **Visual states (one checkbox can be in any of):**
 - **Empty / unselected** — hollow gray border.
@@ -167,7 +173,7 @@ const [book, savedCfi, allHighlights] = await Promise.all([
 ]);
 ```
 
-Pass `allHighlights` into the `<ReaderView>` subtree. The reader provides `<SelectionProvider book={book} initialHighlights={allHighlights}>` around the children.
+Pass `allHighlights` into the `<ReaderView>` subtree. The reader provides `<SelectionProvider book={book} initialHighlights={allHighlights} onRequestPauseAudio={pauseAudio}>` around the children.
 
 Inside the provider:
 
@@ -175,13 +181,15 @@ Inside the provider:
 - **Inject `rail.js`** by calling `useReader().injectJavascript(...)` inside a `useEffect` that runs once per `rendered` section. The injected script is idempotent.
 - **Replay highlights** for each rendered section: filter `allHighlights` to those whose CFI prefix matches the section, call `rendition.annotations.add('highlight', cfiRange, {}, undefined, undefined, { fill: hex, fillOpacity: 0.40 })` for each.
 - **Listen to WebView messages** via the existing message channel; route to provider state:
-  - `selection-changed` → set `pendingSentenceIds` + derived CFI range.
+  - `selection-changed` → set `pendingSentenceIds` + derived CFI range + selected text.
   - `rail-ready`, `log` → console only.
 
 Selection-context internal state (not exposed via `SelectionAPI`):
 - `pendingSentenceIds: Set<string>` — current pending tap selection.
 - `pendingCfiRanges: string[]` — derived from the WebView's `selection-changed`, one entry per contiguous run.
+- `selectedText: string` — derived from the WebView's selected chunks.
 - `lastPickedColor: HighlightColor` — initialized to `'yellow'`, updated on every successful `applyColor` call. Used as the default color for `saveNote` so notes attached without an explicit color pick still get a visible highlight.
+- `noteMode: boolean` — controls rail visibility. Entering note mode calls `onRequestPauseAudio`.
 
 Selection-context method bodies:
 
@@ -268,16 +276,18 @@ src/highlights/
 
 After implementation, verify on both simulators:
 
-1. Open a book → right rail of small gray circles appears next to each sentence.
-2. Tap one → it fills gray (pending). Bottom-bar swatches go from disabled to enabled (the user's bar consumes `hasSelection`).
-3. Tap a yellow swatch → that sentence highlights yellow, rail circle fills yellow, pending clears, bar swatches disable.
-4. Select 3 sentences across a paragraph break → tap green → all three highlight green.
-5. Re-select a green-highlighted sentence + 2 unhighlighted → tap red → all three become red (overwrite-with-split confirmed).
-6. Select a highlighted sentence → erase → highlight removed, sentence reverts to plain.
-7. Change font size mid-read → highlights remain on the same text spans, rail re-aligns.
-8. Navigate to next chapter and back → highlights still visible.
-9. Force-quit the app → reopen the book → highlights restored at launch.
-10. Delete the book from the library → re-import the same EPUB → no orphan highlights from the deleted instance.
+1. Open a book → no highlight rail is visible in normal reading.
+2. Tap the bottom-bar note button → audio pauses and right rail dots appear.
+3. Tap one dot → it fills gray (pending). Bottom-bar swatches and note text box become enabled.
+4. Tap a lower dot → the text between the anchor and target is selected.
+5. Tap a yellow swatch → that selection highlights yellow, rail dots fill yellow, pending clears, note mode can remain active.
+6. Select 3 chunks across a paragraph break → tap green → all three highlight green.
+7. Re-select a green-highlighted sentence + 2 unhighlighted → tap red → all three become red (overwrite-with-split confirmed).
+8. Select a highlighted sentence → erase → highlight removed, sentence reverts to plain.
+9. Change font size mid-read → highlights remain on the same text spans, rail re-aligns.
+10. Navigate to next chapter and back → highlights still visible.
+11. Force-quit the app → reopen the book → highlights restored at launch.
+12. Delete the book from the library → re-import the same EPUB → no orphan highlights from the deleted instance.
 
 ## Future-proofing notes (non-binding)
 

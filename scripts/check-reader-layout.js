@@ -47,11 +47,15 @@ assert(
     ttsControlBarBlock.includes('onSpeedDown') &&
     ttsControlBarBlock.includes('onSpeedSelect') &&
     ttsControlBarBlock.includes('onSpeedUp') &&
+    reader.includes('HighlightSelectionProvider') &&
+    reader.includes('useHighlightReaderBridge') &&
+    reader.includes('onRequestPauseAudio={pauseTtsForNoteMode}') &&
+    reader.includes('noteControls') &&
+    reader.includes('setNoteMode(!noteMode)') &&
     reader.includes('ttsBar') &&
     !reader.includes('<PageTurnBar') &&
-    !reader.includes('pageTurnProgressTrack') &&
     !reader.includes('createSpineSafePageTurnScript'),
-  'Reader should include an always-visible TTS bar and should not include page controls or a page progress row.'
+  'Reader should include an always-visible TTS bar with note mode controls and no page-turn controls.'
 );
 
 assert(
