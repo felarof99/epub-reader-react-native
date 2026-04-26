@@ -6,7 +6,8 @@
     "start": "expo start",
     "ios": "expo start --ios",
     "android": "expo start --android",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:reader": "node scripts/check-reader-layout.js"
   },
   "dependencies": {
     "@epubjs-react-native/core": "^1.4.7",
