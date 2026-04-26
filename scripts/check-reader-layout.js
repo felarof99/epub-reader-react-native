@@ -16,10 +16,11 @@ assert(
 );
 
 assert(
-  reader.includes('manager="continuous"') &&
-    reader.includes('flow="scrolled-doc"') &&
-    reader.includes('keepScrollOffsetOnLocationChange'),
-  'Reader should use continuous vertical scrolling instead of page flipping.'
+  reader.includes('manager="default"') &&
+    reader.includes('flow="paginated"') &&
+    reader.includes('spread="none"') &&
+    reader.includes('fullsize={false}'),
+  'Reader should use stable single-page paginated rendering for page flipping.'
 );
 
 assert(
@@ -31,10 +32,10 @@ assert(
 
 assert(
   reader.includes('<PageTurnBar') &&
-    reader.includes('goPrevious') &&
-    reader.includes('goNext') &&
+    reader.includes('createSpineSafePageTurnScript') &&
+    reader.includes('book.spine.get') &&
     reader.includes('pageTurnBar'),
-  'Reader should include an always-visible thin bottom page turn bar.'
+  'Reader should include an always-visible thin bottom page turn bar with a spine fallback.'
 );
 
 assert(

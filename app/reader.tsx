@@ -254,9 +254,10 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
           height="100%"
           initialLocation={initialCfi}
           defaultTheme={initialThemeRef.current}
-          manager="continuous"
-          flow="scrolled-doc"
-          keepScrollOffsetOnLocationChange
+          manager="default"
+          flow="paginated"
+          spread="none"
+          fullsize={false}
           onLocationChange={handleLocationChange}
           onDisplayError={(message: string) => onError(message || 'Unknown error')}
           renderLoadingFileComponent={() => (
@@ -293,10 +294,18 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
   );
 }
 
+type PageTurnDirection = 'next' | 'previous';
+
 function PageTurnBar({ themeId }: { themeId: ReaderThemeId }) {
-  const { goPrevious, goNext, atStart, atEnd, progress } = useReader();
+  const { injectJavascript, atStart, atEnd, progress } = useReader();
   const activeTheme = READER_THEMES[themeId];
   const progressPercent = normalizeProgress(progress);
+  const turnPrevious = useCallback(() => {
+    injectJavascript(createSpineSafePageTurnScript('previous'));
+  }, [injectJavascript]);
+  const turnNext = useCallback(() => {
+    injectJavascript(createSpineSafePageTurnScript('next'));
+  }, [injectJavascript]);
 
   return (
     <View
@@ -312,7 +321,7 @@ function PageTurnBar({ themeId }: { themeId: ReaderThemeId }) {
         accessibilityLabel="Previous page"
         disabled={atStart}
         hitSlop={8}
-        onPress={() => goPrevious()}
+        onPress={turnPrevious}
         style={({ pressed }) => [
           styles.pageTurnButton,
           pressed && !atStart && { backgroundColor: activeTheme.colors.pressed },
@@ -335,7 +344,7 @@ function PageTurnBar({ themeId }: { themeId: ReaderThemeId }) {
         accessibilityLabel="Next page"
         disabled={atEnd}
         hitSlop={8}
-        onPress={() => goNext()}
+        onPress={turnNext}
         style={({ pressed }) => [
           styles.pageTurnButton,
           pressed && !atEnd && { backgroundColor: activeTheme.colors.pressed },
@@ -346,6 +355,56 @@ function PageTurnBar({ themeId }: { themeId: ReaderThemeId }) {
       </Pressable>
     </View>
   );
+}
+
+function createSpineSafePageTurnScript(direction: PageTurnDirection): string {
+  const action = direction === 'next' ? 'next' : 'prev';
+  const spineStep = direction === 'next' ? 1 : -1;
+
+  return `
+    (function () {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const currentLocation = () => rendition && rendition.currentLocation ? rendition.currentLocation() : null;
+      const startCfi = (location) => location && location.start ? location.start.cfi : null;
+      const startIndex = (location) =>
+        location && location.start && typeof location.start.index === 'number'
+          ? location.start.index
+          : null;
+
+      (async function () {
+        let relocated = false;
+        if (rendition && rendition.once) {
+          rendition.once('relocated', function () {
+            relocated = true;
+          });
+        }
+
+        const before = currentLocation();
+        const beforeCfi = startCfi(before);
+        const beforeIndex = startIndex(before);
+        const result = rendition.${action}();
+
+        if (result && typeof result.then === 'function') {
+          await result.catch(function () {});
+        }
+
+        await wait(350);
+
+        const after = currentLocation();
+        const afterCfi = startCfi(after);
+        if (relocated || (beforeCfi && afterCfi && beforeCfi !== afterCfi)) return;
+
+        const index = beforeIndex !== null ? beforeIndex : startIndex(after);
+        if (index === null || !book || !book.spine || !rendition || !rendition.display) return;
+
+        const section = book.spine.get(index + ${spineStep});
+        if (section && section.href) {
+          rendition.display(section.href);
+        }
+      })().catch(function () {});
+    })();
+    true;
+  `;
 }
 
 function normalizeProgress(value: number): number {
