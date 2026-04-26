@@ -2,7 +2,7 @@ import { Reader, useReader } from '@epubjs-react-native/core';
 import type { Location, Section, Theme } from '@epubjs-react-native/core';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -46,6 +46,7 @@ import {
   createClearHighlightScript,
   createHighlightWordScript,
   createRequestNextParagraphScript,
+  createRequestSelectedParagraphScript,
   createRequestVisibleParagraphScript,
 } from '../src/tts/readerBridge';
 import * as ttsSettings from '../src/tts/settings';
@@ -181,7 +182,7 @@ function ReaderView({ book, fileUri, initialCfi, initialHighlights, onError }: R
   const [wordTimings, setWordTimings] = useState<WordTiming[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestIdRef = useRef(0);
-  const pendingRequestRef = useRef<'visible' | 'next' | null>(null);
+  const pendingRequestRef = useRef<'visible' | 'next' | 'selected' | null>(null);
   const latestRequestIdRef = useRef<string | null>(null);
   const generationTokenRef = useRef(0);
   const exhaustedAutoplayParagraphIdRef = useRef<string | null>(null);
@@ -301,6 +302,19 @@ function ReaderView({ book, fileUri, initialCfi, initialHighlights, onError }: R
     setTtsError(null);
     injectJavascript(createRequestNextParagraphScript(requestId, paragraphId));
   }, [injectJavascript, nextRequestId]);
+
+  const requestSelectedParagraph = useCallback((cfiRange: string) => {
+    const trimmedCfiRange = cfiRange.trim();
+    const requestId = nextRequestId();
+    pendingRequestRef.current = 'selected';
+    latestRequestIdRef.current = requestId;
+    exhaustedAutoplayParagraphIdRef.current = null;
+    userPausedTtsRef.current = false;
+    setTtsLoading(true);
+    setTtsError(null);
+    clearTtsHighlight();
+    injectJavascript(createRequestSelectedParagraphScript(requestId, trimmedCfiRange));
+  }, [clearTtsHighlight, injectJavascript, nextRequestId]);
 
   const handleSpeedChange = useCallback(async (speed: TtsSpeed) => {
     setTtsPrefs((current) => ({ ...current, speed }));
@@ -505,6 +519,7 @@ function ReaderView({ book, fileUri, initialCfi, initialHighlights, onError }: R
           defaultTheme={initialThemeRef.current}
           themeId={activePreferences.themeId}
           onLocationChange={handleLocationChange}
+          onReadAloudFromSelection={requestSelectedParagraph}
           onWebViewMessage={handleTtsWebViewMessage}
           onError={onError}
         />
@@ -560,6 +575,7 @@ function ReaderContent({
   defaultTheme,
   themeId,
   onLocationChange,
+  onReadAloudFromSelection,
   onWebViewMessage,
   onError,
 }: {
@@ -573,6 +589,7 @@ function ReaderContent({
     progress: number,
     currentSection: Section | null
   ) => void;
+  onReadAloudFromSelection: (cfiRange: string) => void;
   onWebViewMessage: (message: TtsBridgeMessage) => void;
   onError: (message: string) => void;
 }) {
@@ -584,6 +601,19 @@ function ReaderContent({
       onWebViewMessage(message as TtsBridgeMessage);
     },
     [handleHighlightWebViewMessage, onWebViewMessage]
+  );
+  const ttsMenuItems = useMemo(
+    () => [
+      {
+        key: 'read-aloud-from-here',
+        label: 'Read aloud from here',
+        action: (cfiRange: string) => {
+          onReadAloudFromSelection(cfiRange);
+          return false;
+        },
+      },
+    ],
+    [onReadAloudFromSelection]
   );
 
   return (
@@ -601,6 +631,7 @@ function ReaderContent({
           enableSelection
           keepScrollOffsetOnLocationChange
           injectedJavascript={injectedJavascript}
+          menuItems={ttsMenuItems}
           onWebViewMessage={handleWebViewMessage}
           onLocationChange={onLocationChange}
           onDisplayError={(message: string) => onError(message || 'Unknown error')}

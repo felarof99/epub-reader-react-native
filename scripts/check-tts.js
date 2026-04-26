@@ -102,6 +102,7 @@ assert(
 assert(
   reader.includes('onWebViewMessage={handleTtsWebViewMessage}') &&
     reader.includes('createRequestVisibleParagraphScript') &&
+    reader.includes('createRequestSelectedParagraphScript') &&
     reader.includes('generateSpeech') &&
     !reader.includes('fetchVoices') &&
     !reader.includes('placeholder="ElevenLabs API key"'),
@@ -131,14 +132,21 @@ assertIncludes(
   'TTS control bar should expose direct speed selection in addition to plus/minus speed controls.'
 );
 assert(
-  !reader.includes("label: 'Read aloud'") &&
-    !reader.includes('menuItems={ttsMenuItems}') &&
-    !reader.includes("pendingRequestRef.current = 'selected'") &&
-    !reader.includes('createRequestSelectedParagraphScript') &&
+  reader.includes("label: 'Read aloud from here'") &&
+    reader.includes('menuItems={ttsMenuItems}') &&
+    reader.includes("pendingRequestRef.current = 'selected'") &&
+    reader.includes('createRequestSelectedParagraphScript(requestId, trimmedCfiRange)') &&
+    reader.includes('return false;') &&
     reader.includes('HighlightSelectionProvider') &&
     reader.includes('useHighlightReaderBridge') &&
     reader.includes('noteControls'),
-  'Reader should remove only the custom Read aloud selection menu while preserving highlight rail/note UI.'
+  'Reader should expose Read aloud from here in the selection menu while preserving highlight rail/note UI.'
+);
+assert(
+  !reader.includes("label: 'Read aloud'") &&
+    !reader.includes("setTtsError('Could not find selected text.');") &&
+    reader.includes('const trimmedCfiRange = cfiRange.trim();'),
+  'Reader should use the exact Read aloud from here label and allow empty menu CFI values for live-selection fallback.'
 );
 
 assertMatches(
