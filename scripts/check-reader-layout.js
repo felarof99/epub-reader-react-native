@@ -5,6 +5,17 @@ const reader = fs.readFileSync('app/reader.tsx', 'utf8');
 const preferences = fs.readFileSync('src/reader/preferences.ts', 'utf8');
 const preferenceStorage = fs.readFileSync('src/storage/readerPreferences.ts', 'utf8');
 
+function extractJsxBlock(source, startToken) {
+  const start = source.indexOf(startToken);
+  assert(start >= 0, `Could not find JSX block start: ${startToken}`);
+  const end = source.indexOf('/>', start + startToken.length);
+  assert(end >= 0, `Could not find JSX block end after ${startToken}`);
+  return source.slice(start, end + 2);
+}
+
+const readerBlock = extractJsxBlock(reader, '<Reader\n');
+const ttsControlBarBlock = extractJsxBlock(reader, '<TtsControlBar');
+
 assert(
   !reader.includes('useWindowDimensions'),
   'Reader should measure its actual pane instead of using full window dimensions.'
@@ -16,11 +27,11 @@ assert(
 );
 
 assert(
-  reader.includes('manager="default"') &&
-    reader.includes('flow="paginated"') &&
-    reader.includes('spread="none"') &&
-    reader.includes('fullsize={false}'),
-  'Reader should use stable single-page paginated rendering for page flipping.'
+  readerBlock.includes('manager="continuous"') &&
+    readerBlock.includes('flow="scrolled-doc"') &&
+    readerBlock.includes('keepScrollOffsetOnLocationChange') &&
+    !readerBlock.includes('flow="paginated"'),
+  'Reader should use continuous vertical scrolling instead of page flipping.'
 );
 
 assert(
@@ -31,27 +42,34 @@ assert(
 );
 
 assert(
-  reader.includes('<PageTurnBar') &&
-    reader.includes('createSpineSafePageTurnScript') &&
-    reader.includes('book.spine.get') &&
-    reader.includes('pageTurnBar'),
-  'Reader should include an always-visible thin bottom page turn bar with a spine fallback.'
+  ttsControlBarBlock.includes('onSeekBack') &&
+    ttsControlBarBlock.includes('onSeekForward') &&
+    ttsControlBarBlock.includes('onSpeedDown') &&
+    ttsControlBarBlock.includes('onSpeedUp') &&
+    reader.includes('ttsBar') &&
+    !reader.includes('<PageTurnBar') &&
+    !reader.includes('pageTurnProgressTrack') &&
+    !reader.includes('createSpineSafePageTurnScript'),
+  'Reader should include an always-visible TTS bar and should not include page controls or a page progress row.'
 );
 
 assert(
   preferences.includes("sepia") &&
     preferences.includes("dark") &&
     preferences.includes('fontSizePercent') &&
+    preferences.includes('readerThemeForPreferences') &&
     preferences.includes('READER_FONT_SIZE_MAX') &&
     preferences.includes("'overflow-wrap'") &&
     preferences.includes("'max-width'"),
-  'Reader preferences should define sepia/dark themes, bounded font sizes, and robust EPUB content constraints.'
+  'Reader preferences should define sepia/dark themes, bounded font sizes, initial font-size themes, and robust EPUB content constraints.'
 );
 
 assert(
   preferenceStorage.includes('AsyncStorage') &&
     preferenceStorage.includes('readerPreferences') &&
     reader.includes('readerPreferences.get()') &&
-    reader.includes('readerPreferences.save(normalized)'),
-  'Reader should persist theme and text-size preferences.'
+    reader.includes('readerPreferences.save(normalized)') &&
+    reader.includes('readerThemeForPreferences(savedPreferences)') &&
+    reader.includes('readerThemeForPreferences({ fontSize, themeId })'),
+  'Reader should persist and automatically apply saved theme and text-size preferences.'
 );
