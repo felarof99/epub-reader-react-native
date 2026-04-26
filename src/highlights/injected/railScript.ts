@@ -12,13 +12,14 @@ const RAIL_CSS = `
 
   .rn-hl-rail {
     display: none;
-    position: absolute;
+    position: fixed;
     top: 0;
-    right: 3px;
-    width: 26px;
-    min-height: 100%;
+    right: 6px;
+    width: 30px;
+    height: 100vh;
     pointer-events: none;
     z-index: 2147483647;
+    touch-action: none;
   }
 
   body.rn-hl-note-mode .rn-hl-rail {
@@ -27,7 +28,7 @@ const RAIL_CSS = `
 
   .rn-hl-dot {
     position: absolute;
-    right: 5px;
+    right: 6px;
     width: 13px;
     height: 13px;
     margin: 0;
@@ -39,6 +40,8 @@ const RAIL_CSS = `
     box-sizing: border-box;
     -webkit-appearance: none;
     appearance: none;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+    transform: translateY(-50%);
   }
 
   .rn-hl-dot.rn-hl-pending {
@@ -70,15 +73,17 @@ const RAIL_CSS = `
 export function createHighlightRailScript(): string {
   return `
     (function () {
-      if (window.__rnHighlightRail && window.__rnHighlightRail.version === 1) {
+      if (window.__rnHighlightRail && window.__rnHighlightRail.version === 3) {
         window.__rnHighlightRail.processAll();
         true;
         return;
       }
 
       const railCss = ${JSON.stringify(RAIL_CSS)};
+      const readableBlockSelector = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,div,section,article,main,td,th,dd,dt';
+      const minTextLength = 2;
       const state = {
-        version: 1,
+        version: 3,
         noteMode: false,
         anchor: null,
         selectedIds: [],
@@ -117,19 +122,34 @@ export function createHighlightRailScript(): string {
       }
 
       function installStyle(doc) {
-        if (doc.getElementById('rn-highlight-rail-style')) return;
-
-        const style = doc.createElement('style');
-        style.id = 'rn-highlight-rail-style';
+        let style = doc.getElementById('rn-highlight-rail-style');
+        if (!style) {
+          style = doc.createElement('style');
+          style.id = 'rn-highlight-rail-style';
+          (doc.head || doc.documentElement).appendChild(style);
+        }
         style.textContent = railCss;
-        (doc.head || doc.documentElement).appendChild(style);
+      }
+
+      function normalizeText(text) {
+        return (text || '').replace(/\\s+/g, ' ').trim();
+      }
+
+      function hasNestedReadableBlock(element) {
+        return Array.prototype.slice.call(element.querySelectorAll(readableBlockSelector)).some(function (child) {
+          return normalizeText(child.textContent).length >= minTextLength;
+        });
       }
 
       function selectableBlocks(doc) {
         return Array.prototype.slice.call(
-          doc.querySelectorAll('p, li, blockquote, h1, h2, h3, h4, h5, h6')
+          doc.querySelectorAll(readableBlockSelector)
         ).filter(function (node) {
-          return node && node.textContent && node.textContent.trim().length > 0;
+          return (
+            node &&
+            normalizeText(node.textContent).length >= minTextLength &&
+            !hasNestedReadableBlock(node)
+          );
         });
       }
 
@@ -231,7 +251,7 @@ export function createHighlightRailScript(): string {
           return {
             id: id,
             order: index,
-            text: (element.textContent || '').replace(/\\s+/g, ' ').trim(),
+            text: normalizeText(element.textContent),
             cfiRange: cfiForElement(contents, element),
             element: element,
             dot: null,
@@ -241,32 +261,54 @@ export function createHighlightRailScript(): string {
         });
       }
 
-      function ensureRail(doc) {
-        let rail = doc.querySelector('.rn-hl-rail');
+      function ensureRail() {
+        let rail = document.querySelector('.rn-hl-rail');
         if (rail) return rail;
 
-        rail = doc.createElement('div');
+        rail = document.createElement('div');
         rail.className = 'rn-hl-rail';
-        doc.body.appendChild(rail);
+        document.body.appendChild(rail);
         return rail;
       }
 
-      function renderRail(sectionData) {
-        const doc = sectionData.doc;
-        const win = doc.defaultView || window;
-        const rail = ensureRail(doc);
+      function resetRailDots() {
+        const rail = ensureRail();
         rail.innerHTML = '';
+        Object.keys(state.sections).forEach(function (key) {
+          state.sections[key].chunks.forEach(function (chunk) {
+            chunk.dot = null;
+          });
+        });
+      }
+
+      function frameTopForContents(contents) {
+        try {
+          if (contents && contents.iframe && contents.iframe.getBoundingClientRect) {
+            return contents.iframe.getBoundingClientRect().top;
+          }
+        } catch (error) {
+          return 0;
+        }
+        return 0;
+      }
+
+      function renderRail(sectionData) {
+        const rail = ensureRail();
+        const frameTop = frameTopForContents(sectionData.contents);
 
         sectionData.chunks.forEach(function (chunk) {
           const rects = chunk.element.getClientRects();
           const rect = rects && rects.length > 0 ? rects[0] : chunk.element.getBoundingClientRect();
           if (!rect || !Number.isFinite(rect.top)) return;
 
-          const dot = doc.createElement('button');
+          const top = frameTop + rect.top + Math.min(Math.max(rect.height / 2, 6), 12);
+          if (top < -24 || top > window.innerHeight + 24) return;
+
+          const dot = document.createElement('button');
           dot.type = 'button';
           dot.className = 'rn-hl-dot';
           dot.dataset.sid = chunk.id;
-          dot.style.top = Math.max(0, rect.top + (win.scrollY || 0)) + 'px';
+          dot.style.top = Math.max(0, top) + 'px';
           dot.setAttribute('aria-label', 'Select text chunk');
           dot.addEventListener('click', function (event) {
             event.preventDefault();
@@ -285,6 +327,9 @@ export function createHighlightRailScript(): string {
         if (!doc || !doc.body) return;
 
         installStyle(doc);
+        doc.querySelectorAll('.rn-hl-rail').forEach(function (rail) {
+          if (rail.parentNode) rail.parentNode.removeChild(rail);
+        });
         if (!doc.body.style.position) doc.body.style.position = 'relative';
         doc.body.classList.toggle('rn-hl-note-mode', state.noteMode);
 
@@ -306,7 +351,11 @@ export function createHighlightRailScript(): string {
       }
 
       function processAll() {
+        installStyle(document);
+        document.body.classList.toggle('rn-hl-note-mode', state.noteMode);
+        resetRailDots();
         getContentsList().forEach(processContents);
+        applyVisualState();
       }
 
       function selectedChunkObjects() {
@@ -334,6 +383,7 @@ export function createHighlightRailScript(): string {
           const sectionData = state.sections[key];
           const selected = new Set(state.selectedIds);
 
+          document.body.classList.toggle('rn-hl-note-mode', state.noteMode);
           sectionData.doc.body.classList.toggle('rn-hl-note-mode', state.noteMode);
           sectionData.chunks.forEach(function (chunk) {
             const color = state.highlightMap[chunk.id];
@@ -451,7 +501,7 @@ export function createHighlightRailScript(): string {
       }
 
       window.__rnHighlightRail = {
-        version: 1,
+        version: 3,
         processAll: processAll,
         setNoteMode: setNoteMode,
         clearPending: clearPending,

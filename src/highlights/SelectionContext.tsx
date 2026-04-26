@@ -142,6 +142,7 @@ export function HighlightSelectionProvider({
   const setNoteMode = useCallback(
     (enabled: boolean) => {
       setNoteModeState(enabled);
+      injectJavascript(injectedJavascript);
       injectJavascript(createSetNoteModeScript(enabled));
 
       if (enabled) {
@@ -153,7 +154,7 @@ export function HighlightSelectionProvider({
       selectionRef.current = emptySelection;
       injectJavascript(createClearPendingScript());
     },
-    [injectJavascript, onRequestPauseAudio]
+    [injectedJavascript, injectJavascript, onRequestPauseAudio]
   );
 
   const removeOverlappingRecords = useCallback(

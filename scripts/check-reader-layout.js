@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const reader = fs.readFileSync('app/reader.tsx', 'utf8');
 const preferences = fs.readFileSync('src/reader/preferences.ts', 'utf8');
 const preferenceStorage = fs.readFileSync('src/storage/readerPreferences.ts', 'utf8');
+const highlightProvider = fs.readFileSync('src/highlights/SelectionContext.tsx', 'utf8');
+const highlightRail = fs.readFileSync('src/highlights/injected/railScript.ts', 'utf8');
 
 function extractJsxBlock(source, startToken) {
   const start = source.indexOf(startToken);
@@ -56,6 +58,18 @@ assert(
     !reader.includes('<PageTurnBar') &&
     !reader.includes('createSpineSafePageTurnScript'),
   'Reader should include an always-visible TTS bar with note mode controls and no page-turn controls.'
+);
+
+assert(
+  highlightRail.includes("version === 3") &&
+    highlightRail.includes('position: fixed') &&
+    highlightRail.includes('function frameTopForContents') &&
+    highlightRail.includes('const top = frameTop + rect.top') &&
+    highlightRail.includes("const readableBlockSelector = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,div,section,article,main,td,th,dd,dt'") &&
+    highlightRail.includes('!hasNestedReadableBlock(node)') &&
+    highlightProvider.includes('injectJavascript(injectedJavascript)') &&
+    highlightProvider.includes('injectJavascript(createSetNoteModeScript(enabled))'),
+  'Highlight note mode should install a current fixed overlay rail and support EPUBs that use div/section blocks for paragraphs.'
 );
 
 assert(
