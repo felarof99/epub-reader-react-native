@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "EPUB Reader",
+    "slug": "epub-reader-react-native",
+    "version": "0.1.0",
+    "orientation": "default",
+    "scheme": "epubreader",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.personal.epubreader"
+    },
+    "android": {
+      "package": "com.personal.epubreader",
+      "edgeToEdgeEnabled": true
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
