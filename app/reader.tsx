@@ -463,7 +463,9 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
 
   useEffect(() => {
     return () => {
-      void stop();
+      void stop().catch((error) => {
+        console.warn('TTS reader cleanup failed', error);
+      });
       clearTtsHighlight();
     };
   }, [clearTtsHighlight, stop]);

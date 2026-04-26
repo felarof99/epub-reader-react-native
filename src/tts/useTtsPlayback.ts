@@ -9,11 +9,26 @@ type LoadClipParams = {
   speed: TtsSpeed;
 };
 
+function isReleasedPlayerError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes('NativeSharedObjectNotFoundException') ||
+    message.includes('Unable to find the native shared object')
+  );
+}
+
+function warnUnlessReleasedPlayer(label: string, error: unknown): void {
+  if (!isReleasedPlayerError(error)) {
+    console.warn(label, error);
+  }
+}
+
 export function useTtsPlayback() {
   const player = useAudioPlayer(null, { updateInterval: 100 });
   const status = useAudioPlayerStatus(player);
   const currentUriRef = useRef<string | null>(null);
   const loadTokenRef = useRef(0);
+  const mountedRef = useRef(true);
   const pendingDeleteUrisRef = useRef<Set<string>>(new Set());
   const seekTimeRef = useRef(0);
 
@@ -45,18 +60,49 @@ export function useTtsPlayback() {
     [deleteTempFile]
   );
 
+  const pausePlayer = useCallback(() => {
+    try {
+      player.pause();
+    } catch (error) {
+      if (!isReleasedPlayerError(error)) throw error;
+    }
+  }, [player]);
+
+  const replacePlayerSource = useCallback(
+    (source: string | null) => {
+      try {
+        player.replace(source);
+      } catch (error) {
+        if (!isReleasedPlayerError(error)) throw error;
+      }
+    },
+    [player]
+  );
+
+  const seekPlayerTo = useCallback(
+    async (seconds: number, ignoreReleasedPlayer = false) => {
+      try {
+        await player.seekTo(seconds);
+      } catch (error) {
+        if (!ignoreReleasedPlayer || !isReleasedPlayerError(error)) throw error;
+      }
+    },
+    [player]
+  );
+
   const unloadAndCleanupCurrentFile = useCallback(async () => {
     const uri = currentUriRef.current;
     if (!uri) return;
 
-    player.pause();
-    player.replace(null);
+    pausePlayer();
+    replacePlayerSource(null);
     currentUriRef.current = null;
     await deleteTempFile(uri);
-  }, [deleteTempFile, player]);
+  }, [deleteTempFile, pausePlayer, replacePlayerSource]);
 
   const loadAndPlay = useCallback(
     async ({ audioBase64, speed }: LoadClipParams) => {
+      if (!mountedRef.current) return;
       if (!FileSystem.cacheDirectory) throw new Error('Cache directory is unavailable.');
 
       const loadToken = loadTokenRef.current + 1;
@@ -67,7 +113,7 @@ export function useTtsPlayback() {
         encoding: FileSystem.EncodingType.Base64,
       });
 
-      if (loadTokenRef.current !== loadToken) {
+      if (!mountedRef.current || loadTokenRef.current !== loadToken) {
         await deleteTempFile(uri);
         return;
       }
@@ -79,11 +125,12 @@ export function useTtsPlayback() {
         player.setPlaybackRate(speed);
         player.play();
       } catch (error) {
-        if (loadTokenRef.current === loadToken) {
-          player.pause();
-          player.replace(previousUri);
+        if (mountedRef.current && loadTokenRef.current === loadToken) {
+          pausePlayer();
+          replacePlayerSource(previousUri);
         }
         await deleteTempFile(uri);
+        if (!mountedRef.current && isReleasedPlayerError(error)) return;
         throw error;
       }
 
@@ -95,12 +142,12 @@ export function useTtsPlayback() {
       }
       await cleanupPendingDeletes(uri);
     },
-    [cleanupPendingDeletes, deleteTempFile, player]
+    [cleanupPendingDeletes, deleteTempFile, pausePlayer, player, replacePlayerSource]
   );
 
   const pause = useCallback(() => {
-    player.pause();
-  }, [player]);
+    pausePlayer();
+  }, [pausePlayer]);
 
   const resume = useCallback(() => {
     if (currentUriRef.current) {
@@ -110,14 +157,14 @@ export function useTtsPlayback() {
 
   const stop = useCallback(async () => {
     loadTokenRef.current += 1;
-    player.pause();
+    pausePlayer();
     try {
-      await player.seekTo(0);
+      await seekPlayerTo(0, true);
     } finally {
       seekTimeRef.current = 0;
       await unloadAndCleanupCurrentFile();
     }
-  }, [player, unloadAndCleanupCurrentFile]);
+  }, [pausePlayer, seekPlayerTo, unloadAndCleanupCurrentFile]);
 
   const seekBy = useCallback(
     async (seconds: number) => {
@@ -128,13 +175,13 @@ export function useTtsPlayback() {
           : requestedTime;
       seekTimeRef.current = nextTime;
       try {
-        await player.seekTo(nextTime);
+        await seekPlayerTo(nextTime);
       } catch (error) {
         seekTimeRef.current = status.currentTime;
         throw error;
       }
     },
-    [player, status.currentTime, status.duration]
+    [seekPlayerTo, status.currentTime, status.duration]
   );
 
   const setSpeed = useCallback(
@@ -145,9 +192,13 @@ export function useTtsPlayback() {
   );
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       loadTokenRef.current += 1;
-      void unloadAndCleanupCurrentFile();
+      void unloadAndCleanupCurrentFile().catch((error) => {
+        warnUnlessReleasedPlayer('ttsPlayback unmount cleanup failed', error);
+      });
     };
   }, [unloadAndCleanupCurrentFile]);
 

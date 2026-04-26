@@ -71,7 +71,7 @@ function createParagraphRequestScript(
       const requestId = ${JSON.stringify(requestId)};
       const kind = ${JSON.stringify(kind)};
       const currentParagraphId = ${JSON.stringify(currentParagraphId ?? '')};
-      const blockSelector = 'p,h1,h2,h3,h4,h5,h6,li,blockquote';
+      const blockSelector = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,div,section,article,main,td,th,dd,dt';
       const minTextLength = 2;
 
       function send(payload) {

@@ -158,19 +158,40 @@ assertIncludes(
 );
 assertIncludes(
   playback,
-  'player.replace(null)',
-  'Playback cleanup should detach the player source with player.replace(null).'
+  'replacePlayerSource(null)',
+  'Playback cleanup should detach the player source.'
 );
 assertIncludes(
   playback,
   'deleteTempFile(uri)',
   'Playback cleanup should delete temp audio files.'
 );
+assertIncludes(
+  playback,
+  'const mountedRef = useRef(true)',
+  'Playback should track hook mount state so late TTS generation cannot command a released native player.'
+);
+assertIncludes(
+  loadAndPlayBlock,
+  '!mountedRef.current',
+  'loadAndPlay should discard generated clips if the reader unmounted before audio playback starts.'
+);
 for (const hookMember of ['loadAndPlay', 'seekBy', 'setSpeed', 'stop', 'pause', 'resume']) {
   assertIncludes(playbackReturnBlock, hookMember, `Playback hook should return ${hookMember}.`);
 }
 
+assertIncludes(
+  reader,
+  'void stop().catch',
+  'Reader unmount cleanup should catch async TTS stop errors instead of leaving unhandled promise rejections.'
+);
+
 assertIncludes(bridgeRequestScriptBlock, 'const requestId =', 'Bridge request script should carry requestId.');
+assertIncludes(
+  bridgeRequestScriptBlock,
+  "const blockSelector = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,div,section,article,main,td,th,dd,dt';",
+  'Bridge should treat common EPUB wrapper elements as readable text blocks.'
+);
 assertIncludes(
   bridgeRequestScriptBlock,
   "window.ReactNativeWebView.postMessage(JSON.stringify(payload))",
