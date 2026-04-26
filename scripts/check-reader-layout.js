@@ -45,6 +45,7 @@ assert(
   ttsControlBarBlock.includes('onSeekBack') &&
     ttsControlBarBlock.includes('onSeekForward') &&
     ttsControlBarBlock.includes('onSpeedDown') &&
+    ttsControlBarBlock.includes('onSpeedSelect') &&
     ttsControlBarBlock.includes('onSpeedUp') &&
     reader.includes('ttsBar') &&
     !reader.includes('<PageTurnBar') &&

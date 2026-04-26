@@ -82,8 +82,10 @@ assert(
 assert(
   bridge.includes('getBoundingClientRect') &&
     bridge.includes('data-tts-word-id') &&
-    bridge.includes('data-tts-active-word'),
-  'Reader bridge should extract visible paragraphs and mark active words in the WebView.'
+    bridge.includes('data-tts-active-word') &&
+    bridge.includes('wordRangesForElement') &&
+    !bridge.includes('innerHTML ='),
+  'Reader bridge should extract visible paragraph words and mark active words without replacing paragraph HTML.'
 );
 
 assert(
@@ -104,6 +106,11 @@ assertIncludes(
   ttsControlBarBlock,
   'requestVisibleParagraph();',
   'TTS play button should request the visible paragraph from the TTS control bar onPlayPause path.'
+);
+assertIncludes(
+  ttsControlBarBlock,
+  'onSpeedSelect={handleSpeedChange}',
+  'TTS control bar should expose direct speed selection in addition to plus/minus speed controls.'
 );
 
 assertMatches(
@@ -191,7 +198,7 @@ assertIncludes(
 );
 assertIncludes(
   bridgeRequestScriptBlock,
-  "span.setAttribute('data-tts-word-id', word.id)",
+  "span.setAttribute('data-tts-word-id', rangeRecord.wordId)",
   'Bridge should mark generated word spans with data-tts-word-id.'
 );
 assertIncludes(

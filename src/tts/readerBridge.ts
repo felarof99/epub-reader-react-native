@@ -82,35 +82,103 @@ function createParagraphRequestScript(
         return (text || '').replace(/\\s+/g, ' ').trim();
       }
 
-      function wordRecords(text) {
-        const words = [];
-        const pattern = /\\S+/g;
-        let match;
-        while ((match = pattern.exec(text)) !== null) {
-          words.push({
-            id: 'w' + words.length,
-            text: match[0],
-            startOffset: match.index,
-            endOffset: match.index + match[0].length
-          });
+      function textNodesFor(element) {
+        const nodes = [];
+        const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        let node = walker.nextNode();
+        while (node) {
+          if (normalizeText(node.textContent).length > 0) nodes.push(node);
+          node = walker.nextNode();
         }
-        return words;
+        return nodes;
       }
 
-      function ensureWordMarkup(element, paragraphId, words) {
-        if (element.getAttribute('data-tts-paragraph-id') === paragraphId && element.querySelector('[data-tts-word-id]')) {
-          return;
-        }
-
-        element.setAttribute('data-tts-paragraph-id', paragraphId);
-        element.innerHTML = '';
-        words.forEach(function (word, index) {
-          if (index > 0) element.appendChild(element.ownerDocument.createTextNode(' '));
-          const span = element.ownerDocument.createElement('span');
-          span.setAttribute('data-tts-word-id', word.id);
-          span.textContent = word.text;
-          element.appendChild(span);
+      function wordRangesForElement(content, element, startAtFirstVisibleWord) {
+        const ranges = [];
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        textNodesFor(element).forEach(function (node) {
+          const text = node.textContent || '';
+          const pattern = /\\S+/g;
+          let match;
+          while ((match = pattern.exec(text)) !== null) {
+            const range = element.ownerDocument.createRange();
+            range.setStart(node, match.index);
+            range.setEnd(node, match.index + match[0].length);
+            const rect = range.getBoundingClientRect();
+            const top = rect.top + contentTopOffset(content);
+            const bottom = rect.bottom + contentTopOffset(content);
+            if (range.detach) range.detach();
+            ranges.push({
+              node,
+              startOffset: match.index,
+              endOffset: match.index + match[0].length,
+              text: match[0],
+              top,
+              bottom
+            });
+          }
         });
+
+        if (!startAtFirstVisibleWord) return ranges;
+
+        const firstVisibleIndex = ranges.findIndex(function (range) {
+          return range.bottom > 0 && range.top < viewportHeight;
+        });
+
+        return firstVisibleIndex >= 0 ? ranges.slice(firstVisibleIndex) : [];
+      }
+
+      function wordRecordsFromRanges(ranges) {
+        let offset = 0;
+        return ranges.map(function (range, index) {
+          const startOffset = offset;
+          offset += range.text.length;
+          if (index < ranges.length - 1) offset += 1;
+          range.wordId = 'w' + index;
+          return {
+            id: range.wordId,
+            text: range.text,
+            startOffset,
+            endOffset: startOffset + range.text.length
+          };
+        });
+      }
+
+      function textFromRanges(ranges) {
+        return ranges.map(function (range) { return range.text; }).join(' ');
+      }
+
+      function unwrapExistingWordMarkup(element) {
+        Array.prototype.slice.call(element.querySelectorAll('[data-tts-word-id]')).forEach(function (node) {
+          const parent = node.parentNode;
+          if (!parent) return;
+          while (node.firstChild) parent.insertBefore(node.firstChild, node);
+          parent.removeChild(node);
+        });
+        element.removeAttribute('data-tts-paragraph-id');
+      }
+
+      function wrapWordRange(rangeRecord) {
+        const doc = rangeRecord.node.ownerDocument;
+        const range = doc.createRange();
+        range.setStart(rangeRecord.node, rangeRecord.startOffset);
+        range.setEnd(rangeRecord.node, rangeRecord.endOffset);
+        const span = doc.createElement('span');
+        span.setAttribute('data-tts-word-id', rangeRecord.wordId);
+        try {
+          range.surroundContents(span);
+        } catch (error) {
+          const contents = range.extractContents();
+          span.appendChild(contents);
+          range.insertNode(span);
+        }
+        if (range.detach) range.detach();
+      }
+
+      function ensureWordMarkup(element, paragraphId, wordRanges) {
+        unwrapExistingWordMarkup(element);
+        element.setAttribute('data-tts-paragraph-id', paragraphId);
+        wordRanges.slice().reverse().forEach(wrapWordRange);
       }
 
       function contentTopOffset(content) {
@@ -131,17 +199,20 @@ function createParagraphRequestScript(
         return candidate.bottom > 0 && candidate.top < viewportHeight;
       }
 
-      function candidateFromElement(contentIndex, content, element, elementIndex) {
+      function candidateFromElement(contentIndex, content, element, elementIndex, startAtFirstVisibleWord) {
         if (hasNestedReadableBlock(element)) return null;
-        const text = normalizeText(element.textContent);
+        const wordRanges = wordRangesForElement(content, element, startAtFirstVisibleWord);
+        const text = textFromRanges(wordRanges);
         if (text.length < minTextLength) return null;
         const rect = element.getBoundingClientRect();
-        const top = rect.top + contentTopOffset(content);
-        const bottom = rect.bottom + contentTopOffset(content);
+        const firstWordRange = wordRanges[0];
+        const lastWordRange = wordRanges[wordRanges.length - 1];
+        const top = firstWordRange ? firstWordRange.top : rect.top + contentTopOffset(content);
+        const bottom = lastWordRange ? lastWordRange.bottom : rect.bottom + contentTopOffset(content);
         const paragraphId = 'c' + contentIndex + '-e' + elementIndex;
-        const words = wordRecords(text);
+        const words = wordRecordsFromRanges(wordRanges);
         if (words.length === 0) return null;
-        return { contentIndex, elementIndex, paragraphId, text, words, top, bottom, element };
+        return { contentIndex, elementIndex, paragraphId, text, words, top, bottom, element, wordRanges };
       }
 
       try {
@@ -151,7 +222,7 @@ function createParagraphRequestScript(
           const doc = content.document;
           if (!doc) return;
           Array.prototype.slice.call(doc.querySelectorAll(blockSelector)).forEach(function (element, elementIndex) {
-            const candidate = candidateFromElement(contentIndex, content, element, elementIndex);
+            const candidate = candidateFromElement(contentIndex, content, element, elementIndex, kind === 'visible');
             if (candidate) candidates.push(candidate);
           });
         });
@@ -184,7 +255,7 @@ function createParagraphRequestScript(
           return;
         }
 
-        ensureWordMarkup(selected.element, selected.paragraphId, selected.words);
+        ensureWordMarkup(selected.element, selected.paragraphId, selected.wordRanges);
         send({
           type: '${BRIDGE_EVENT_TYPES.paragraph}',
           requestId,

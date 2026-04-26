@@ -49,13 +49,14 @@ import {
   nextTtsSpeed,
   previousTtsSpeed,
 } from '../src/tts/timing';
-import type {
-  ElevenLabsVoice,
-  TtsBridgeMessage,
-  TtsParagraph,
-  TtsSettings,
-  TtsSpeed,
-  WordTiming,
+import {
+  TTS_SPEEDS,
+  type ElevenLabsVoice,
+  type TtsBridgeMessage,
+  type TtsParagraph,
+  type TtsSettings,
+  type TtsSpeed,
+  type WordTiming,
 } from '../src/tts/types';
 import { useTtsPlayback } from '../src/tts/useTtsPlayback';
 
@@ -177,6 +178,7 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
   const generationTokenRef = useRef(0);
   const exhaustedAutoplayParagraphIdRef = useRef<string | null>(null);
   const lastHighlightedWordRef = useRef<{ paragraphId: string; wordId: string } | null>(null);
+  const userPausedTtsRef = useRef(false);
   const initialThemeRef = useRef(readerThemeForPreferences(DEFAULT_READER_PREFERENCES));
   const playback = useTtsPlayback();
   const { injectJavascript } = useReader();
@@ -276,6 +278,7 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
     pendingRequestRef.current = 'visible';
     latestRequestIdRef.current = requestId;
     exhaustedAutoplayParagraphIdRef.current = null;
+    userPausedTtsRef.current = false;
     setTtsLoading(true);
     setTtsError(null);
     injectJavascript(createRequestVisibleParagraphScript(requestId));
@@ -285,6 +288,7 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
     const requestId = nextRequestId();
     pendingRequestRef.current = 'next';
     latestRequestIdRef.current = requestId;
+    userPausedTtsRef.current = false;
     setTtsLoading(true);
     setTtsError(null);
     injectJavascript(createRequestNextParagraphScript(requestId, paragraphId));
@@ -314,14 +318,15 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
   }, [seekBy]);
 
   const loadVoices = useCallback(async () => {
-    if (!apiKey.trim()) {
+    const trimmedApiKey = apiKey.trim();
+    if (!trimmedApiKey) {
       setTtsError('Enter your ElevenLabs API key first.');
       return;
     }
     setVoiceLoading(true);
     setTtsError(null);
     try {
-      setVoices(await fetchVoices(apiKey));
+      setVoices(await fetchVoices(trimmedApiKey));
     } catch (error) {
       setTtsError(error instanceof Error ? error.message : 'Could not load voices.');
     } finally {
@@ -344,8 +349,9 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
   const playParagraph = useCallback(async (paragraph: TtsParagraph) => {
     const generationToken = generationTokenRef.current + 1;
     generationTokenRef.current = generationToken;
+    const trimmedApiKey = apiKey.trim();
 
-    if (!apiKey.trim()) {
+    if (!trimmedApiKey) {
       setTtsError('Enter your ElevenLabs API key in settings first.');
       pendingRequestRef.current = null;
       latestRequestIdRef.current = null;
@@ -369,7 +375,7 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
 
     try {
       const speech = await generateSpeech({
-        apiKey,
+        apiKey: trimmedApiKey,
         voiceId: ttsPrefs.selectedVoice.voiceId,
         text: paragraph.text,
       });
@@ -380,6 +386,7 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
       setCurrentParagraph(paragraph);
       setWordTimings(timings);
       exhaustedAutoplayParagraphIdRef.current = null;
+      userPausedTtsRef.current = false;
       await loadAndPlay({ audioBase64: speech.audio_base64, speed: ttsPrefs.speed });
     } catch (error) {
       if (generationTokenRef.current === generationToken) {
@@ -447,6 +454,7 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
 
   useEffect(() => {
     if (!currentParagraph || playback.isPlaying || ttsLoading || pendingRequestRef.current) return;
+    if (userPausedTtsRef.current) return;
     if (exhaustedAutoplayParagraphIdRef.current === currentParagraph.paragraphId) return;
     if (playback.duration > 0 && playback.currentTime >= playback.duration - 0.15) {
       requestNextParagraph(currentParagraph.paragraphId);
@@ -542,8 +550,10 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
         error={ttsError}
         onPlayPause={() => {
           if (playback.isPlaying) {
+            userPausedTtsRef.current = true;
             playback.pause();
           } else if (playback.isLoaded && currentParagraph) {
+            userPausedTtsRef.current = false;
             playback.resume();
           } else {
             requestVisibleParagraph();
@@ -552,6 +562,7 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
         onSeekBack={() => handleSeekBy(-10)}
         onSeekForward={() => handleSeekBy(10)}
         onSpeedDown={() => handleSpeedChange(previousTtsSpeed(ttsPrefs.speed))}
+        onSpeedSelect={handleSpeedChange}
         onSpeedUp={() => handleSpeedChange(nextTtsSpeed(ttsPrefs.speed))}
       />
       <ReaderPreferenceApplier
@@ -595,6 +606,7 @@ function TtsControlBar({
   onSeekBack,
   onSeekForward,
   onSpeedDown,
+  onSpeedSelect,
   onSpeedUp,
 }: {
   themeId: ReaderThemeId;
@@ -607,20 +619,44 @@ function TtsControlBar({
   onSeekBack: () => void;
   onSeekForward: () => void;
   onSpeedDown: () => void;
+  onSpeedSelect: (speed: TtsSpeed) => void;
   onSpeedUp: () => void;
 }) {
   const activeTheme = READER_THEMES[themeId];
 
   return (
     <View style={[styles.ttsBar, { backgroundColor: activeTheme.colors.background, borderTopColor: activeTheme.colors.border }]}>
-      <View style={styles.ttsControlsRow}>
+      <View style={styles.ttsSpeedControls}>
         <Pressable accessibilityLabel="Decrease narration speed" hitSlop={8} onPress={onSpeedDown} style={styles.ttsSmallButton}>
           <Ionicons name="remove" size={18} color={activeTheme.colors.text} />
         </Pressable>
-        <Text style={[styles.ttsSpeedLabel, { color: activeTheme.colors.text }]}>{formatTtsSpeed(speed)}</Text>
+        {TTS_SPEEDS.map((speedOption) => {
+          const selected = speedOption === speed;
+          return (
+            <Pressable
+              key={speedOption}
+              accessibilityLabel={`Set narration speed to ${formatTtsSpeed(speedOption)}`}
+              hitSlop={6}
+              onPress={() => onSpeedSelect(speedOption)}
+              style={[
+                styles.ttsSpeedOption,
+                {
+                  borderColor: selected ? activeTheme.colors.control : activeTheme.colors.border,
+                  backgroundColor: selected ? activeTheme.colors.control : activeTheme.colors.background,
+                },
+              ]}
+            >
+              <Text style={[styles.ttsSpeedLabel, { color: selected ? activeTheme.colors.controlText : activeTheme.colors.text }]}>
+                {formatTtsSpeed(speedOption)}
+              </Text>
+            </Pressable>
+          );
+        })}
         <Pressable accessibilityLabel="Increase narration speed" hitSlop={8} onPress={onSpeedUp} style={styles.ttsSmallButton}>
           <Ionicons name="add" size={18} color={activeTheme.colors.text} />
         </Pressable>
+      </View>
+      <View style={styles.ttsControlsRow}>
         <Pressable accessibilityLabel="Rewind 10 seconds" disabled={!loaded} hitSlop={8} onPress={onSeekBack} style={[styles.ttsButton, !loaded && styles.disabledControl]}>
           <Ionicons name="play-back" size={22} color={activeTheme.colors.text} />
         </Pressable>
@@ -921,7 +957,7 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   headerButton: { paddingHorizontal: 8, paddingVertical: 4 },
   ttsBar: {
-    minHeight: 58,
+    minHeight: 94,
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 10,
     paddingVertical: 7,
@@ -933,6 +969,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
+  },
+  ttsSpeedControls: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
   },
   ttsButton: {
     width: 42,
@@ -952,6 +995,15 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  ttsSpeedOption: {
+    minWidth: 48,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
   },
   ttsSpeedLabel: {
     minWidth: 34,
