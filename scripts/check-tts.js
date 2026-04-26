@@ -102,7 +102,6 @@ assert(
 assert(
   reader.includes('onWebViewMessage={handleTtsWebViewMessage}') &&
     reader.includes('createRequestVisibleParagraphScript') &&
-    reader.includes('createRequestSelectedParagraphScript') &&
     reader.includes('generateSpeech') &&
     !reader.includes('fetchVoices') &&
     !reader.includes('placeholder="ElevenLabs API key"'),
@@ -132,17 +131,14 @@ assertIncludes(
   'TTS control bar should expose direct speed selection in addition to plus/minus speed controls.'
 );
 assert(
-  reader.includes("label: 'Read aloud'") &&
-    reader.includes('menuItems={ttsMenuItems}') &&
-    reader.includes("pendingRequestRef.current = 'selected'") &&
-    reader.includes('createRequestSelectedParagraphScript(requestId, trimmedCfiRange)') &&
-    reader.includes('return false;'),
-  'Reader should expose a native selection menu action that keeps selection long enough to request TTS from the selected CFI range.'
-);
-assert(
-  !reader.includes("setTtsError('Could not find selected text.');") &&
-    reader.includes('const trimmedCfiRange = cfiRange.trim();'),
-  'Reader should allow empty menu CFI values so the bridge can fall back to the live EPUB selection.'
+  !reader.includes("label: 'Read aloud'") &&
+    !reader.includes('menuItems={ttsMenuItems}') &&
+    !reader.includes("pendingRequestRef.current = 'selected'") &&
+    !reader.includes('createRequestSelectedParagraphScript') &&
+    reader.includes('HighlightSelectionProvider') &&
+    reader.includes('useHighlightReaderBridge') &&
+    reader.includes('noteControls'),
+  'Reader should remove only the custom Read aloud selection menu while preserving highlight rail/note UI.'
 );
 
 assertMatches(

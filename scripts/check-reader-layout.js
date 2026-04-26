@@ -32,8 +32,10 @@ assert(
   readerBlock.includes('manager="continuous"') &&
     readerBlock.includes('flow="scrolled-doc"') &&
     readerBlock.includes('keepScrollOffsetOnLocationChange') &&
+    readerBlock.includes('enableSelection') &&
+    !readerBlock.includes('menuItems={ttsMenuItems}') &&
     !readerBlock.includes('flow="paginated"'),
-  'Reader should use continuous vertical scrolling instead of page flipping.'
+  'Reader should use continuous vertical scrolling with native text selection enabled and no custom Read aloud selection menu.'
 );
 
 assert(
