@@ -84,8 +84,10 @@ assert(
     bridge.includes('data-tts-word-id') &&
     bridge.includes('data-tts-active-word') &&
     bridge.includes('wordRangesForElement') &&
+    bridge.includes("typeof rendition === 'undefined'") &&
+    !bridge.includes('window.rendition') &&
     !bridge.includes('innerHTML ='),
-  'Reader bridge should extract visible paragraph words and mark active words without replacing paragraph HTML.'
+  'Reader bridge should extract visible paragraph words from EPUB.js rendition and mark active words without replacing paragraph HTML.'
 );
 
 assert(

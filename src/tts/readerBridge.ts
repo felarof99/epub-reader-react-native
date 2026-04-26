@@ -19,7 +19,11 @@ export function createHighlightWordScript(paragraphId: string, wordId: string): 
     (function () {
       const targetParagraphId = ${JSON.stringify(paragraphId)};
       const targetWordId = ${JSON.stringify(wordId)};
-      const contents = window.rendition && window.rendition.getContents ? window.rendition.getContents() : [];
+      function getRenditionContents() {
+        if (typeof rendition === 'undefined' || !rendition || !rendition.getContents) return [];
+        return rendition.getContents();
+      }
+      const contents = getRenditionContents();
       contents.forEach(function (content) {
         const doc = content.document;
         if (!doc) return;
@@ -46,7 +50,11 @@ export function createHighlightWordScript(paragraphId: string, wordId: string): 
 export function createClearHighlightScript(): string {
   return `
     (function () {
-      const contents = window.rendition && window.rendition.getContents ? window.rendition.getContents() : [];
+      function getRenditionContents() {
+        if (typeof rendition === 'undefined' || !rendition || !rendition.getContents) return [];
+        return rendition.getContents();
+      }
+      const contents = getRenditionContents();
       contents.forEach(function (content) {
         const doc = content.document;
         if (!doc) return;
@@ -76,6 +84,11 @@ function createParagraphRequestScript(
 
       function send(payload) {
         window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+      }
+
+      function getRenditionContents() {
+        if (typeof rendition === 'undefined' || !rendition || !rendition.getContents) return [];
+        return rendition.getContents();
       }
 
       function normalizeText(text) {
@@ -216,7 +229,7 @@ function createParagraphRequestScript(
       }
 
       try {
-        const contents = window.rendition && window.rendition.getContents ? window.rendition.getContents() : [];
+        const contents = getRenditionContents();
         const candidates = [];
         contents.forEach(function (content, contentIndex) {
           const doc = content.document;
