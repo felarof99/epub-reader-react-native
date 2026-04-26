@@ -7,7 +7,9 @@
     "ios": "expo start --ios",
     "android": "expo start --android",
     "typecheck": "tsc --noEmit",
-    "check:reader": "node scripts/check-reader-layout.js"
+    "check:reader": "node scripts/check-reader-layout.js",
+    "check:tts": "node scripts/check-tts.js",
+    "test:tts": "tsx --test src/tts/*.test.ts"
   },
   "dependencies": {
     "@epubjs-react-native/core": "^1.4.7",
@@ -15,10 +17,12 @@
     "@expo/metro-runtime": "~6.1.2",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~54.0.0",
+    "expo-audio": "~1.1.1",
     "expo-crypto": "~15.0.8",
     "expo-document-picker": "~14.0.8",
     "expo-file-system": "~19.0.21",
     "expo-router": "~6.0.23",
+    "expo-secure-store": "~15.0.8",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -33,6 +37,7 @@
   "private": true,
   "devDependencies": {
     "@types/react": "^19.2.14",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }
 }
