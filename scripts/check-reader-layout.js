@@ -4,8 +4,12 @@ const assert = require('node:assert/strict');
 const reader = fs.readFileSync('app/reader.tsx', 'utf8');
 const preferences = fs.readFileSync('src/reader/preferences.ts', 'utf8');
 const preferenceStorage = fs.readFileSync('src/storage/readerPreferences.ts', 'utf8');
-const highlightProvider = fs.readFileSync('src/highlights/SelectionContext.tsx', 'utf8');
-const highlightRail = fs.readFileSync('src/highlights/injected/railScript.ts', 'utf8');
+const removedHighlightFiles = [
+  'src/highlights/SelectionContext.tsx',
+  'src/highlights/highlights.ts',
+  'src/highlights/injected/railScript.ts',
+  'src/highlights/webviewBridge.ts',
+];
 
 function extractJsxBlock(source, startToken) {
   const start = source.indexOf(startToken);
@@ -51,24 +55,20 @@ assert(
     ttsControlBarBlock.includes('onSpeedDown') &&
     ttsControlBarBlock.includes('onSpeedSelect') &&
     ttsControlBarBlock.includes('onSpeedUp') &&
-    reader.includes('HighlightSelectionProvider') &&
-    reader.includes('useHighlightReaderBridge') &&
-    reader.includes('onRequestPauseAudio={pauseTtsForNoteMode}') &&
-    reader.includes('noteControls') &&
-    reader.includes('setNoteMode(!noteMode)') &&
     reader.includes('ttsBar') &&
     !reader.includes('<PageTurnBar') &&
+    !reader.includes('pageTurnProgressTrack') &&
     !reader.includes('createSpineSafePageTurnScript'),
-  'Reader should include an always-visible TTS bar with note mode controls and no page-turn controls.'
+  'Reader should include an always-visible TTS bar and should not include page controls or a page progress row.'
 );
 
 assert(
-  highlightRail.includes("version === 2") &&
-    highlightRail.includes("const readableBlockSelector = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,div,section,article,main,td,th,dd,dt'") &&
-    highlightRail.includes('!hasNestedReadableBlock(node)') &&
-    highlightProvider.includes('injectJavascript(injectedJavascript)') &&
-    highlightProvider.includes('injectJavascript(createSetNoteModeScript(enabled))'),
-  'Highlight note mode should install a current rail script and support EPUBs that use div/section blocks for paragraphs.'
+  removedHighlightFiles.every((file) => !fs.existsSync(file)) &&
+    !reader.includes('HighlightSelectionProvider') &&
+    !reader.includes('useHighlightReaderBridge') &&
+    !reader.includes('noteControls') &&
+    !reader.includes('setNoteMode(!noteMode)'),
+  'Highlight rail/note mode files and reader wiring should remain removed.'
 );
 
 assert(

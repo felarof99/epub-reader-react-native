@@ -10,7 +10,6 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -19,13 +18,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as library from '../src/books/library';
 import type { BookRecord } from '../src/books/library';
 import { bookFileUri } from '../src/books/import';
-import {
-  HighlightSelectionProvider,
-  useHighlightReaderBridge,
-  useHighlightSelection,
-} from '../src/highlights/SelectionContext';
-import * as highlightStore from '../src/highlights/highlights';
-import { HIGHLIGHT_PALETTE, type Highlight, type HighlightColor } from '../src/highlights/highlights';
 import {
   DEFAULT_READER_PREFERENCES,
   READER_FONT_SIZE_MAX,
@@ -70,7 +62,7 @@ import { useTtsPlayback } from '../src/tts/useTtsPlayback';
 type LoadState =
   | { status: 'loading' }
   | { status: 'missing' }
-  | { status: 'ready'; book: BookRecord; fileUri: string; initialCfi?: string; highlights: Highlight[] }
+  | { status: 'ready'; book: BookRecord; fileUri: string; initialCfi?: string }
   | { status: 'error'; message: string };
 
 export default function ReaderScreen() {
@@ -86,10 +78,9 @@ export default function ReaderScreen() {
         if (!cancelled) setState({ status: 'missing' });
         return;
       }
-      const [book, savedCfi, savedHighlights] = await Promise.all([
+      const [book, savedCfi] = await Promise.all([
         library.getById(bookId),
         lastLocation.get(bookId),
-        highlightStore.list(bookId),
       ]);
       if (cancelled) return;
       if (!book) {
@@ -101,7 +92,6 @@ export default function ReaderScreen() {
         book,
         fileUri: bookFileUri(book),
         initialCfi: savedCfi,
-        highlights: savedHighlights,
       });
     })();
     return () => {
@@ -154,7 +144,6 @@ export default function ReaderScreen() {
       book={state.book}
       fileUri={state.fileUri}
       initialCfi={state.initialCfi}
-      initialHighlights={state.highlights}
       onError={(message) => setState({ status: 'error', message })}
     />
   );
@@ -164,11 +153,10 @@ type ReaderViewProps = {
   book: BookRecord;
   fileUri: string;
   initialCfi?: string;
-  initialHighlights: Highlight[];
   onError: (message: string) => void;
 };
 
-function ReaderView({ book, fileUri, initialCfi, initialHighlights, onError }: ReaderViewProps) {
+function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
   const router = useRouter();
   const [tocVisible, setTocVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
@@ -191,7 +179,7 @@ function ReaderView({ book, fileUri, initialCfi, initialHighlights, onError }: R
   const initialThemeRef = useRef(readerThemeForPreferences(DEFAULT_READER_PREFERENCES));
   const playback = useTtsPlayback();
   const { injectJavascript } = useReader();
-  const { loadAndPlay, pause, seekBy, setSpeed, stop } = playback;
+  const { loadAndPlay, seekBy, setSpeed, stop } = playback;
 
   useEffect(() => {
     return () => {
@@ -458,11 +446,6 @@ function ReaderView({ book, fileUri, initialCfi, initialHighlights, onError }: R
 
   const activePreferences = preferences ?? DEFAULT_READER_PREFERENCES;
   const activeTheme = READER_THEMES[activePreferences.themeId];
-  const pauseTtsForNoteMode = useCallback(() => {
-    if (!playback.isPlaying) return;
-    userPausedTtsRef.current = true;
-    pause();
-  }, [pause, playback.isPlaying]);
 
   if (!preferences) {
     return (
@@ -508,63 +491,57 @@ function ReaderView({ book, fileUri, initialCfi, initialHighlights, onError }: R
           ),
         }}
       />
-      <HighlightSelectionProvider
-        bookId={book.id}
-        initialHighlights={initialHighlights}
-        onRequestPauseAudio={pauseTtsForNoteMode}
-      >
-        <ReaderContent
-          fileUri={fileUri}
-          initialCfi={initialCfi}
-          defaultTheme={initialThemeRef.current}
-          themeId={activePreferences.themeId}
-          onLocationChange={handleLocationChange}
-          onReadAloudFromSelection={requestSelectedParagraph}
-          onWebViewMessage={handleTtsWebViewMessage}
-          onError={onError}
-        />
-        <TtsControlBar
-          themeId={activePreferences.themeId}
-          loading={ttsLoading}
-          playing={playback.isPlaying}
-          loaded={playback.isLoaded}
-          speed={ttsPrefs.speed}
-          error={ttsError}
-          onPlayPause={() => {
-            if (playback.isPlaying) {
-              userPausedTtsRef.current = true;
-              playback.pause();
-            } else if (playback.isLoaded && currentParagraph) {
-              userPausedTtsRef.current = false;
-              playback.resume();
-            } else {
-              requestVisibleParagraph();
-            }
-          }}
-          onSeekBack={() => handleSeekBy(-10)}
-          onSeekForward={() => handleSeekBy(10)}
-          onSpeedDown={() => handleSpeedChange(previousTtsSpeed(ttsPrefs.speed))}
-          onSpeedSelect={handleSpeedChange}
-          onSpeedUp={() => handleSpeedChange(nextTtsSpeed(ttsPrefs.speed))}
-        />
-        <ReaderPreferenceApplier
-          fontSize={activePreferences.fontSize}
-          themeId={activePreferences.themeId}
-        />
-        <ReaderSettingsModal
-          visible={settingsVisible}
-          fontSize={activePreferences.fontSize}
-          themeId={activePreferences.themeId}
-          onClose={() => setSettingsVisible(false)}
-          onFontSizeChange={(fontSize) => updatePreferences({ fontSize })}
-          onThemeChange={(themeId) => updatePreferences({ themeId })}
-        />
-        <TocModal
-          visible={tocVisible}
-          themeId={activePreferences.themeId}
-          onClose={() => setTocVisible(false)}
-        />
-      </HighlightSelectionProvider>
+      <ReaderContent
+        fileUri={fileUri}
+        initialCfi={initialCfi}
+        defaultTheme={initialThemeRef.current}
+        themeId={activePreferences.themeId}
+        onLocationChange={handleLocationChange}
+        onReadAloudFromSelection={requestSelectedParagraph}
+        onWebViewMessage={handleTtsWebViewMessage}
+        onError={onError}
+      />
+      <TtsControlBar
+        themeId={activePreferences.themeId}
+        loading={ttsLoading}
+        playing={playback.isPlaying}
+        loaded={playback.isLoaded}
+        speed={ttsPrefs.speed}
+        error={ttsError}
+        onPlayPause={() => {
+          if (playback.isPlaying) {
+            userPausedTtsRef.current = true;
+            playback.pause();
+          } else if (playback.isLoaded && currentParagraph) {
+            userPausedTtsRef.current = false;
+            playback.resume();
+          } else {
+            requestVisibleParagraph();
+          }
+        }}
+        onSeekBack={() => handleSeekBy(-10)}
+        onSeekForward={() => handleSeekBy(10)}
+        onSpeedDown={() => handleSpeedChange(previousTtsSpeed(ttsPrefs.speed))}
+        onSpeedSelect={handleSpeedChange}
+        onSpeedUp={() => handleSpeedChange(nextTtsSpeed(ttsPrefs.speed))}
+      />
+      <ReaderPreferenceApplier
+        fontSize={activePreferences.fontSize}
+        themeId={activePreferences.themeId}
+      />
+      <ReaderSettingsModal
+        visible={settingsVisible}
+        fontSize={activePreferences.fontSize}
+        themeId={activePreferences.themeId}
+        onClose={() => setSettingsVisible(false)}
+        onFontSizeChange={(fontSize) => updatePreferences({ fontSize })}
+        onThemeChange={(themeId) => updatePreferences({ themeId })}
+      />
+      <TocModal
+        visible={tocVisible}
+        themeId={activePreferences.themeId}
+        onClose={() => setTocVisible(false)}
+      />
     </View>
   );
 }
@@ -594,13 +571,11 @@ function ReaderContent({
   onError: (message: string) => void;
 }) {
   const activeTheme = READER_THEMES[themeId];
-  const { injectedJavascript, handleWebViewMessage: handleHighlightWebViewMessage } = useHighlightReaderBridge();
   const handleWebViewMessage = useCallback(
     (message: unknown) => {
-      handleHighlightWebViewMessage(message);
       onWebViewMessage(message as TtsBridgeMessage);
     },
-    [handleHighlightWebViewMessage, onWebViewMessage]
+    [onWebViewMessage]
   );
   const ttsMenuItems = useMemo(
     () => [
@@ -617,37 +592,34 @@ function ReaderContent({
   );
 
   return (
-    <>
-      <View style={[styles.readerArea, { backgroundColor: activeTheme.colors.background }]}>
-        <Reader
-          src={fileUri}
-          fileSystem={useLegacyFileSystem}
-          width="100%"
-          height="100%"
-          initialLocation={initialCfi}
-          defaultTheme={defaultTheme}
-          manager="continuous"
-          flow="scrolled-doc"
-          enableSelection
-          keepScrollOffsetOnLocationChange
-          injectedJavascript={injectedJavascript}
-          menuItems={ttsMenuItems}
-          onWebViewMessage={handleWebViewMessage}
-          onLocationChange={onLocationChange}
-          onDisplayError={(message: string) => onError(message || 'Unknown error')}
-          renderLoadingFileComponent={() => (
-            <View style={[styles.center, { backgroundColor: activeTheme.colors.background }]}>
-              <ActivityIndicator />
-            </View>
-          )}
-          renderOpeningBookComponent={() => (
-            <View style={[styles.center, { backgroundColor: activeTheme.colors.background }]}>
-              <ActivityIndicator />
-            </View>
-          )}
-        />
-      </View>
-    </>
+    <View style={[styles.readerArea, { backgroundColor: activeTheme.colors.background }]}>
+      <Reader
+        src={fileUri}
+        fileSystem={useLegacyFileSystem}
+        width="100%"
+        height="100%"
+        initialLocation={initialCfi}
+        defaultTheme={defaultTheme}
+        manager="continuous"
+        flow="scrolled-doc"
+        enableSelection
+        keepScrollOffsetOnLocationChange
+        menuItems={ttsMenuItems}
+        onWebViewMessage={handleWebViewMessage}
+        onLocationChange={onLocationChange}
+        onDisplayError={(message: string) => onError(message || 'Unknown error')}
+        renderLoadingFileComponent={() => (
+          <View style={[styles.center, { backgroundColor: activeTheme.colors.background }]}>
+            <ActivityIndicator />
+          </View>
+        )}
+        renderOpeningBookComponent={() => (
+          <View style={[styles.center, { backgroundColor: activeTheme.colors.background }]}>
+            <ActivityIndicator />
+          </View>
+        )}
+      />
+    </View>
   );
 }
 
@@ -678,33 +650,7 @@ function TtsControlBar({
   onSpeedSelect: (speed: TtsSpeed) => void;
   onSpeedUp: () => void;
 }) {
-  const {
-    noteMode,
-    setNoteMode,
-    hasSelection,
-    selectedCount,
-    lastPickedColor,
-    saveNote,
-    erase,
-    clearSelection,
-  } = useHighlightSelection();
   const activeTheme = READER_THEMES[themeId];
-  const [draftColor, setDraftColor] = useState<HighlightColor>(lastPickedColor);
-  const [noteDraft, setNoteDraft] = useState('');
-
-  useEffect(() => {
-    setDraftColor(lastPickedColor);
-  }, [lastPickedColor]);
-
-  useEffect(() => {
-    if (hasSelection) return;
-    setNoteDraft('');
-  }, [hasSelection]);
-
-  const saveDraft = useCallback(async () => {
-    await saveNote(noteDraft, draftColor);
-    setNoteDraft('');
-  }, [draftColor, noteDraft, saveNote]);
 
   return (
     <View style={[styles.ttsBar, { backgroundColor: activeTheme.colors.background, borderTopColor: activeTheme.colors.border }]}>
@@ -734,23 +680,12 @@ function TtsControlBar({
             </Pressable>
           );
         })}
-        <Pressable
-          accessibilityLabel="Increase narration speed"
-          hitSlop={8}
-          onPress={onSpeedUp}
-          style={styles.ttsSmallButton}
-        >
+        <Pressable accessibilityLabel="Increase narration speed" hitSlop={8} onPress={onSpeedUp} style={styles.ttsSmallButton}>
           <Ionicons name="add" size={18} color={activeTheme.colors.text} />
         </Pressable>
       </View>
       <View style={styles.ttsControlsRow}>
-        <Pressable
-          accessibilityLabel="Rewind 10 seconds"
-          disabled={!loaded}
-          hitSlop={8}
-          onPress={onSeekBack}
-          style={[styles.ttsButton, !loaded && styles.disabledControl]}
-        >
+        <Pressable accessibilityLabel="Rewind 10 seconds" disabled={!loaded} hitSlop={8} onPress={onSeekBack} style={[styles.ttsButton, !loaded && styles.disabledControl]}>
           <Ionicons name="play-back" size={22} color={activeTheme.colors.text} />
         </Pressable>
         <Pressable
@@ -766,122 +701,10 @@ function TtsControlBar({
             <Ionicons name={playing ? 'pause' : 'play'} size={24} color={activeTheme.colors.controlText} />
           )}
         </Pressable>
-        <Pressable
-          accessibilityLabel="Forward 10 seconds"
-          disabled={!loaded}
-          hitSlop={8}
-          onPress={onSeekForward}
-          style={[styles.ttsButton, !loaded && styles.disabledControl]}
-        >
+        <Pressable accessibilityLabel="Forward 10 seconds" disabled={!loaded} hitSlop={8} onPress={onSeekForward} style={[styles.ttsButton, !loaded && styles.disabledControl]}>
           <Ionicons name="play-forward" size={22} color={activeTheme.colors.text} />
         </Pressable>
-        <Pressable
-          accessibilityLabel={noteMode ? 'Exit note mode' : 'Enter note mode'}
-          hitSlop={8}
-          onPress={() => setNoteMode(!noteMode)}
-          style={[
-            styles.ttsButton,
-            noteMode && { backgroundColor: activeTheme.colors.pressed },
-          ]}
-        >
-          <Ionicons name={noteMode ? 'create' : 'create-outline'} size={21} color={activeTheme.colors.text} />
-        </Pressable>
       </View>
-
-      {noteMode ? (
-        <View style={styles.noteControls}>
-          <View style={styles.swatchRow}>
-            {(Object.keys(HIGHLIGHT_PALETTE) as HighlightColor[]).map((color) => {
-              const selected = color === draftColor;
-              return (
-                <Pressable
-                  key={color}
-                  accessibilityLabel={`${HIGHLIGHT_PALETTE[color].label} highlight`}
-                  disabled={!hasSelection}
-                  hitSlop={6}
-                  onPress={() => setDraftColor(color)}
-                  style={[
-                    styles.swatchButton,
-                    {
-                      borderColor: selected ? activeTheme.colors.text : activeTheme.colors.border,
-                      opacity: hasSelection ? 1 : 0.35,
-                    },
-                  ]}
-                >
-                  <View
-                    style={[
-                      styles.swatch,
-                      { backgroundColor: HIGHLIGHT_PALETTE[color].hex },
-                    ]}
-                  />
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <TextInput
-            accessibilityLabel="Highlight note"
-            editable={hasSelection}
-            placeholder={hasSelection ? `${selectedCount} selected` : 'Select dots'}
-            placeholderTextColor={activeTheme.colors.mutedText}
-            value={noteDraft}
-            onChangeText={setNoteDraft}
-            numberOfLines={1}
-            style={[
-              styles.noteInput,
-              {
-                borderColor: activeTheme.colors.border,
-                color: activeTheme.colors.text,
-                backgroundColor: activeTheme.colors.background,
-              },
-              !hasSelection && styles.disabledControl,
-            ]}
-          />
-
-          <Pressable
-            accessibilityLabel="Erase highlight"
-            disabled={!hasSelection}
-            hitSlop={6}
-            onPress={erase}
-            style={({ pressed }) => [
-              styles.noteActionButton,
-              pressed && hasSelection && { backgroundColor: activeTheme.colors.pressed },
-              !hasSelection && styles.disabledControl,
-            ]}
-          >
-            <Ionicons name="trash-outline" size={16} color={activeTheme.colors.text} />
-          </Pressable>
-
-          <Pressable
-            accessibilityLabel="Cancel selection"
-            disabled={!hasSelection}
-            hitSlop={6}
-            onPress={clearSelection}
-            style={({ pressed }) => [
-              styles.noteActionButton,
-              pressed && hasSelection && { backgroundColor: activeTheme.colors.pressed },
-              !hasSelection && styles.disabledControl,
-            ]}
-          >
-            <Ionicons name="close" size={17} color={activeTheme.colors.text} />
-          </Pressable>
-
-          <Pressable
-            accessibilityLabel="Save note"
-            disabled={!hasSelection}
-            hitSlop={6}
-            onPress={saveDraft}
-            style={({ pressed }) => [
-              styles.noteActionButton,
-              { backgroundColor: hasSelection ? activeTheme.colors.pressed : 'transparent' },
-              pressed && hasSelection && { backgroundColor: activeTheme.colors.pressed },
-              !hasSelection && styles.disabledControl,
-            ]}
-          >
-            <Ionicons name="checkmark" size={17} color={activeTheme.colors.text} />
-          </Pressable>
-        </View>
-      ) : null}
       {error ? (
         <Text style={[styles.ttsError, { color: activeTheme.colors.mutedText }]} numberOfLines={2}>
           {error}
@@ -1126,48 +949,6 @@ const styles = StyleSheet.create({
   ttsButton: {
     width: 42,
     height: 42,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  noteControls: {
-    minHeight: 36,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingBottom: 6,
-  },
-  swatchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  swatchButton: {
-    width: 25,
-    height: 28,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  swatch: {
-    width: 15,
-    height: 15,
-    borderRadius: 8,
-  },
-  noteInput: {
-    flex: 1,
-    height: 30,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  noteActionButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },

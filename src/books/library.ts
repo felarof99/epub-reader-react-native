@@ -1,7 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import * as highlights from '../highlights/highlights';
-
 const LIBRARY_KEY = 'library';
 
 export type BookRecord = {
@@ -42,7 +40,6 @@ export async function remove(id: string): Promise<void> {
   const records = await readAll();
   const next = records.filter((record) => record.id !== id);
   await writeAll(next);
-  await highlights.clearForBook(id);
 }
 
 export async function getById(id: string): Promise<BookRecord | undefined> {

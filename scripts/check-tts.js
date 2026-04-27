@@ -137,10 +137,10 @@ assert(
     reader.includes("pendingRequestRef.current = 'selected'") &&
     reader.includes('createRequestSelectedParagraphScript(requestId, trimmedCfiRange)') &&
     reader.includes('return false;') &&
-    reader.includes('HighlightSelectionProvider') &&
-    reader.includes('useHighlightReaderBridge') &&
-    reader.includes('noteControls'),
-  'Reader should expose Read aloud from here in the selection menu while preserving highlight rail/note UI.'
+    !reader.includes('HighlightSelectionProvider') &&
+    !reader.includes('useHighlightReaderBridge') &&
+    !reader.includes('noteControls'),
+  'Reader should expose Read aloud from here in the selection menu without the reverted highlight rail/note UI.'
 );
 assert(
   !reader.includes("label: 'Read aloud'") &&
