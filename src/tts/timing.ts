@@ -1,25 +1,40 @@
-import { TTS_SPEEDS, type ElevenLabsAlignment, type TtsSpeed, type TtsWord, type WordTiming } from './types';
+import {
+  DEFAULT_TTS_SPEED,
+  TTS_SPEED_MAX,
+  TTS_SPEED_MIN,
+  TTS_SPEED_STEP,
+  type ElevenLabsAlignment,
+  type TtsSpeed,
+  type TtsWord,
+  type WordTiming,
+} from './types';
 
 export function isTtsSpeed(value: unknown): value is TtsSpeed {
-  return typeof value === 'number' && TTS_SPEEDS.includes(value as TtsSpeed);
+  return typeof value === 'number' && Number.isFinite(value) && value === normalizeTtsSpeed(value);
 }
 
 export function normalizeTtsSpeed(value: unknown): TtsSpeed {
-  return isTtsSpeed(value) ? value : 1;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_TTS_SPEED;
+  return normalizeSpeedStep(value);
 }
 
 export function nextTtsSpeed(current: TtsSpeed): TtsSpeed {
-  const index = TTS_SPEEDS.indexOf(current);
-  return TTS_SPEEDS[Math.min(TTS_SPEEDS.length - 1, index + 1)];
+  return normalizeSpeedStep(current + TTS_SPEED_STEP);
 }
 
 export function previousTtsSpeed(current: TtsSpeed): TtsSpeed {
-  const index = TTS_SPEEDS.indexOf(current);
-  return TTS_SPEEDS[Math.max(0, index - 1)];
+  return normalizeSpeedStep(current - TTS_SPEED_STEP);
 }
 
 export function formatTtsSpeed(speed: TtsSpeed): string {
-  return `${speed}x`;
+  const normalized = normalizeTtsSpeed(speed);
+  return Number.isInteger(normalized) ? `${normalized}x` : `${normalized.toFixed(1)}x`;
+}
+
+function normalizeSpeedStep(speed: number): TtsSpeed {
+  const stepped = Math.round((speed + 1e-8) / TTS_SPEED_STEP) * TTS_SPEED_STEP;
+  const clamped = Math.min(TTS_SPEED_MAX, Math.max(TTS_SPEED_MIN, stepped));
+  return Number(clamped.toFixed(1));
 }
 
 export function mapAlignmentToWordTimings(

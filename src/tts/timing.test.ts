@@ -13,36 +13,41 @@ import {
 import type { ElevenLabsAlignment, TtsWord } from './types';
 
 describe('TTS speed helpers', () => {
-  it('identifies allowed speeds', () => {
+  it('identifies bounded tenth-step speeds', () => {
+    assert.equal(isTtsSpeed(0.5), true);
     assert.equal(isTtsSpeed(1), true);
-    assert.equal(isTtsSpeed(1.5), true);
+    assert.equal(isTtsSpeed(1.1), true);
     assert.equal(isTtsSpeed(2), true);
-    assert.equal(isTtsSpeed(0.5), false);
+    assert.equal(isTtsSpeed(0.4), false);
+    assert.equal(isTtsSpeed(1.05), false);
+    assert.equal(isTtsSpeed(2.1), false);
     assert.equal(isTtsSpeed('1'), false);
   });
 
-  it('normalizes unknown speed values to the default speed', () => {
-    assert.equal(normalizeTtsSpeed(1.5), 1.5);
-    assert.equal(normalizeTtsSpeed(0.75), 1);
+  it('normalizes speed values to bounded tenth-step speeds', () => {
+    assert.equal(normalizeTtsSpeed(1.14), 1.1);
+    assert.equal(normalizeTtsSpeed(1.15), 1.2);
+    assert.equal(normalizeTtsSpeed(0.3), 0.5);
+    assert.equal(normalizeTtsSpeed(2.4), 2);
     assert.equal(normalizeTtsSpeed(undefined), 1);
   });
 
   it('formats speeds with an x suffix', () => {
     assert.equal(formatTtsSpeed(1), '1x');
-    assert.equal(formatTtsSpeed(1.5), '1.5x');
+    assert.equal(formatTtsSpeed(1.1), '1.1x');
     assert.equal(formatTtsSpeed(2), '2x');
   });
 
-  it('steps up through the allowed speeds', () => {
-    assert.equal(nextTtsSpeed(1), 1.5);
-    assert.equal(nextTtsSpeed(1.5), 2);
+  it('steps up by one tenth', () => {
+    assert.equal(nextTtsSpeed(1), 1.1);
+    assert.equal(nextTtsSpeed(1.9), 2);
     assert.equal(nextTtsSpeed(2), 2);
   });
 
-  it('steps down through the allowed speeds', () => {
-    assert.equal(previousTtsSpeed(2), 1.5);
-    assert.equal(previousTtsSpeed(1.5), 1);
-    assert.equal(previousTtsSpeed(1), 1);
+  it('steps down by one tenth', () => {
+    assert.equal(previousTtsSpeed(1.1), 1);
+    assert.equal(previousTtsSpeed(1), 0.9);
+    assert.equal(previousTtsSpeed(0.5), 0.5);
   });
 });
 

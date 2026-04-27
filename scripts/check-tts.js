@@ -95,8 +95,9 @@ assert(
 assert(
   timing.includes('mapAlignmentToWordTimings') &&
     timing.includes('activeWordIdAtTime') &&
-    timing.includes('TTS_SPEEDS'),
-  'Timing helpers should map timestamps to words and enforce allowed speeds.'
+    timing.includes('TTS_SPEED_STEP') &&
+    timing.includes('normalizeSpeedStep'),
+  'Timing helpers should map timestamps to words and normalize speed in bounded 0.1x steps.'
 );
 
 assert(
@@ -126,10 +127,13 @@ assertIncludes(
   'requestVisibleParagraph();',
   'TTS play button should request the visible paragraph from the TTS control bar onPlayPause path.'
 );
-assertIncludes(
-  ttsControlBarBlock,
-  'onSpeedSelect={handleSpeedChange}',
-  'TTS control bar should expose direct speed selection in addition to plus/minus speed controls.'
+assert(
+  ttsControlBarBlock.includes('onSpeedDown={() => handleSpeedChange(previousTtsSpeed(ttsPrefs.speed))}') &&
+    ttsControlBarBlock.includes('onSpeedUp={() => handleSpeedChange(nextTtsSpeed(ttsPrefs.speed))}') &&
+    reader.includes('Current narration speed') &&
+    !reader.includes('TTS_SPEEDS.map') &&
+    !reader.includes('onSpeedSelect'),
+  'TTS control bar should show current speed as text and adjust speed only with plus/minus buttons.'
 );
 assert(
   reader.includes("label: 'Read aloud from here'") &&

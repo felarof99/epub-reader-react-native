@@ -1,6 +1,9 @@
-export const TTS_SPEEDS = [1, 1.5, 2] as const;
+export const DEFAULT_TTS_SPEED = 1;
+export const TTS_SPEED_MAX = 2;
+export const TTS_SPEED_MIN = 0.5;
+export const TTS_SPEED_STEP = 0.1;
 
-export type TtsSpeed = (typeof TTS_SPEEDS)[number];
+export type TtsSpeed = number;
 
 export type ElevenLabsVoice = {
   voice_id: string;

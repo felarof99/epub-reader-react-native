@@ -50,7 +50,6 @@ import {
   previousTtsSpeed,
 } from '../src/tts/timing';
 import {
-  TTS_SPEEDS,
   type TtsBridgeMessage,
   type TtsParagraph,
   type TtsSettings,
@@ -522,7 +521,6 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
         onSeekBack={() => handleSeekBy(-10)}
         onSeekForward={() => handleSeekBy(10)}
         onSpeedDown={() => handleSpeedChange(previousTtsSpeed(ttsPrefs.speed))}
-        onSpeedSelect={handleSpeedChange}
         onSpeedUp={() => handleSpeedChange(nextTtsSpeed(ttsPrefs.speed))}
       />
       <ReaderPreferenceApplier
@@ -634,7 +632,6 @@ function TtsControlBar({
   onSeekBack,
   onSeekForward,
   onSpeedDown,
-  onSpeedSelect,
   onSpeedUp,
 }: {
   themeId: ReaderThemeId;
@@ -647,7 +644,6 @@ function TtsControlBar({
   onSeekBack: () => void;
   onSeekForward: () => void;
   onSpeedDown: () => void;
-  onSpeedSelect: (speed: TtsSpeed) => void;
   onSpeedUp: () => void;
 }) {
   const activeTheme = READER_THEMES[themeId];
@@ -658,28 +654,12 @@ function TtsControlBar({
         <Pressable accessibilityLabel="Decrease narration speed" hitSlop={8} onPress={onSpeedDown} style={styles.ttsSmallButton}>
           <Ionicons name="remove" size={18} color={activeTheme.colors.text} />
         </Pressable>
-        {TTS_SPEEDS.map((speedOption) => {
-          const selected = speedOption === speed;
-          return (
-            <Pressable
-              key={speedOption}
-              accessibilityLabel={`Set narration speed to ${formatTtsSpeed(speedOption)}`}
-              hitSlop={6}
-              onPress={() => onSpeedSelect(speedOption)}
-              style={[
-                styles.ttsSpeedOption,
-                {
-                  borderColor: selected ? activeTheme.colors.control : activeTheme.colors.border,
-                  backgroundColor: selected ? activeTheme.colors.control : activeTheme.colors.background,
-                },
-              ]}
-            >
-              <Text style={[styles.ttsSpeedLabel, { color: selected ? activeTheme.colors.controlText : activeTheme.colors.text }]}>
-                {formatTtsSpeed(speedOption)}
-              </Text>
-            </Pressable>
-          );
-        })}
+        <Text
+          accessibilityLabel={`Current narration speed ${formatTtsSpeed(speed)}`}
+          style={[styles.ttsSpeedLabel, { color: activeTheme.colors.text }]}
+        >
+          {formatTtsSpeed(speed)}
+        </Text>
         <Pressable accessibilityLabel="Increase narration speed" hitSlop={8} onPress={onSpeedUp} style={styles.ttsSmallButton}>
           <Ionicons name="add" size={18} color={activeTheme.colors.text} />
         </Pressable>
@@ -965,17 +945,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  ttsSpeedOption: {
-    minWidth: 48,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-  },
   ttsSpeedLabel: {
-    minWidth: 34,
+    minWidth: 56,
     textAlign: 'center',
     fontSize: 14,
     fontWeight: '700',

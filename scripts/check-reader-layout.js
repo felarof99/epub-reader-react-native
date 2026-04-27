@@ -50,11 +50,12 @@ assert(
 );
 
 assert(
-  ttsControlBarBlock.includes('onSeekBack') &&
+    ttsControlBarBlock.includes('onSeekBack') &&
     ttsControlBarBlock.includes('onSeekForward') &&
     ttsControlBarBlock.includes('onSpeedDown') &&
-    ttsControlBarBlock.includes('onSpeedSelect') &&
     ttsControlBarBlock.includes('onSpeedUp') &&
+    reader.includes('Current narration speed') &&
+    !reader.includes('ttsSpeedOption') &&
     reader.includes('ttsBar') &&
     !reader.includes('<PageTurnBar') &&
     !reader.includes('pageTurnProgressTrack') &&
