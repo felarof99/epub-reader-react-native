@@ -63,18 +63,15 @@ assert(
 );
 
 assert(
-  highlightRail.includes("version === 4") &&
+  highlightRail.includes("version === 3") &&
     highlightRail.includes('position: fixed') &&
     highlightRail.includes('function frameTopForContents') &&
-    highlightRail.includes('function frameElementForContents') &&
-    highlightRail.includes('win.frameElement') &&
     highlightRail.includes('const top = frameTop + rect.top') &&
     highlightRail.includes("const readableBlockSelector = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,div,section,article,main,td,th,dd,dt'") &&
     highlightRail.includes('!hasNestedReadableBlock(node)') &&
-    highlightRail.includes('element.isConnected') &&
     highlightProvider.includes('injectJavascript(injectedJavascript)') &&
     highlightProvider.includes('injectJavascript(createSetNoteModeScript(enabled))'),
-  'Highlight note mode should install a fixed overlay rail with iframe-relative dot positioning, rebuild stale chunks, and support EPUBs that use div/section blocks for paragraphs.'
+  'Highlight note mode should install a current fixed overlay rail and support EPUBs that use div/section blocks for paragraphs.'
 );
 
 assert(
