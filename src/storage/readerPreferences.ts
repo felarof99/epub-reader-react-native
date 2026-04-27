@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   DEFAULT_READER_PREFERENCES,
   clampReaderFontSize,
+  isReaderReadingMode,
   isReaderThemeId,
   type ReaderPreferences,
 } from '../reader/preferences';
@@ -18,6 +19,9 @@ export async function get(): Promise<ReaderPreferences> {
 
     return {
       fontSize: clampReaderFontSize(parsed.fontSize),
+      readingMode: isReaderReadingMode(parsed.readingMode)
+        ? parsed.readingMode
+        : DEFAULT_READER_PREFERENCES.readingMode,
       themeId: isReaderThemeId(parsed.themeId) ? parsed.themeId : DEFAULT_READER_PREFERENCES.themeId,
     };
   } catch (error) {
@@ -32,6 +36,9 @@ export async function save(preferences: ReaderPreferences): Promise<void> {
       READER_PREFERENCES_KEY,
       JSON.stringify({
         fontSize: clampReaderFontSize(preferences.fontSize),
+        readingMode: isReaderReadingMode(preferences.readingMode)
+          ? preferences.readingMode
+          : DEFAULT_READER_PREFERENCES.readingMode,
         themeId: preferences.themeId,
       })
     );

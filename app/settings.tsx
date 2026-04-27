@@ -13,6 +13,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import {
+  DEFAULT_READER_PREFERENCES,
+  type ReaderPreferences,
+  type ReaderReadingMode,
+} from '../src/reader/preferences';
+import * as readerPreferences from '../src/storage/readerPreferences';
 import { fetchVoices, generateSpeech } from '../src/tts/elevenLabs';
 import * as ttsSettings from '../src/tts/settings';
 import type { ElevenLabsVoice, TtsSettings } from '../src/tts/types';
@@ -20,9 +26,26 @@ import { useTtsPlayback } from '../src/tts/useTtsPlayback';
 
 const SAMPLE_PREVIEW_TEXT = 'This is a short preview of this ElevenLabs voice.';
 const DEFAULT_TTS_SETTINGS: TtsSettings = { speed: 1 };
+const READING_MODE_OPTIONS: Array<{
+  description: string;
+  label: string;
+  value: ReaderReadingMode;
+}> = [
+  {
+    description: 'Read vertically through the book.',
+    label: 'Continuous scroll',
+    value: 'continuous',
+  },
+  {
+    description: 'Read one page at a time.',
+    label: 'Page by page',
+    value: 'paged',
+  },
+];
 
 export default function SettingsScreen() {
   const [apiKey, setApiKey] = useState('');
+  const [readerPrefs, setReaderPrefs] = useState<ReaderPreferences>(DEFAULT_READER_PREFERENCES);
   const [settings, setSettings] = useState<TtsSettings>(DEFAULT_TTS_SETTINGS);
   const [voices, setVoices] = useState<ElevenLabsVoice[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -41,10 +64,11 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([ttsSettings.getApiKey(), ttsSettings.getSettings()])
-      .then(([savedApiKey, savedSettings]) => {
+    Promise.all([ttsSettings.getApiKey(), ttsSettings.getSettings(), readerPreferences.get()])
+      .then(([savedApiKey, savedSettings, savedReaderPrefs]) => {
         if (cancelled) return;
         setApiKey(savedApiKey);
+        setReaderPrefs(savedReaderPrefs);
         setSettings(savedSettings);
       })
       .catch((loadError) => {
@@ -65,6 +89,14 @@ export default function SettingsScreen() {
     setApiKey(nextApiKey);
     void ttsSettings.saveApiKey(nextApiKey).catch((saveError) => {
       setError(saveError instanceof Error ? saveError.message : 'Could not save API key.');
+    });
+  }, []);
+
+  const selectReadingMode = useCallback((readingMode: ReaderReadingMode) => {
+    setReaderPrefs((current) => {
+      const next = { ...current, readingMode };
+      void readerPreferences.save(next);
+      return next;
     });
   }, []);
 
@@ -150,6 +182,33 @@ export default function SettingsScreen() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Reading</Text>
+            <View style={styles.optionList}>
+              {READING_MODE_OPTIONS.map((option) => {
+                const selected = option.value === readerPrefs.readingMode;
+                return (
+                  <Pressable
+                    key={option.value}
+                    accessibilityRole="button"
+                    onPress={() => selectReadingMode(option.value)}
+                    style={({ pressed }) => [
+                      styles.optionRow,
+                      selected && styles.optionRowSelected,
+                      pressed && styles.rowPressed,
+                    ]}
+                  >
+                    <View style={styles.optionText}>
+                      <Text style={styles.optionLabel}>{option.label}</Text>
+                      <Text style={styles.optionDescription}>{option.description}</Text>
+                    </View>
+                    {selected ? <Ionicons name="checkmark" size={21} color="#111" /> : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>ElevenLabs</Text>
             <TextInput
@@ -264,6 +323,23 @@ const styles = StyleSheet.create({
   primaryButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   selectedVoiceText: { fontSize: 13, color: '#666' },
   errorText: { fontSize: 13, color: '#666' },
+  optionList: { gap: 8 },
+  optionRow: {
+    minHeight: 62,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#d8d8d8',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  optionRowSelected: { borderColor: '#111' },
+  optionText: { flex: 1, gap: 2 },
+  optionLabel: { fontSize: 15, fontWeight: '700', color: '#111' },
+  optionDescription: { fontSize: 13, color: '#666' },
+  rowPressed: { backgroundColor: '#f3f3f3' },
   voiceList: { gap: 8 },
   voiceRow: {
     minHeight: 56,

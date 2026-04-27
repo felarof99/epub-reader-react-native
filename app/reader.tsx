@@ -27,8 +27,10 @@ import {
   clampReaderFontSize,
   fontSizePercent,
   nextReaderFontSize,
+  readerLayoutForPreferences,
   readerThemeForPreferences,
   type ReaderPreferences,
+  type ReaderReadingMode,
   type ReaderThemeId,
 } from '../src/reader/preferences';
 import { useLegacyFileSystem } from '../src/reader/useLegacyFileSystem';
@@ -228,6 +230,7 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
 
       const normalized = {
         fontSize: clampReaderFontSize(updated.fontSize),
+        readingMode: updated.readingMode,
         themeId: updated.themeId,
       };
 
@@ -501,6 +504,7 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
         fileUri={fileUri}
         initialCfi={initialCfi}
         defaultTheme={initialThemeRef.current}
+        readingMode={activePreferences.readingMode}
         themeId={activePreferences.themeId}
         onLocationChange={handleLocationChange}
         onReadAloudFromSelection={requestSelectedParagraph}
@@ -556,6 +560,7 @@ function ReaderContent({
   fileUri,
   initialCfi,
   defaultTheme,
+  readingMode,
   themeId,
   onLocationChange,
   onReadAloudFromSelection,
@@ -566,6 +571,7 @@ function ReaderContent({
   fileUri: string;
   initialCfi?: string;
   defaultTheme: Theme;
+  readingMode: ReaderReadingMode;
   themeId: ReaderThemeId;
   onLocationChange: (
     totalLocations: number,
@@ -579,6 +585,7 @@ function ReaderContent({
   onError: (message: string) => void;
 }) {
   const activeTheme = READER_THEMES[themeId];
+  const activeLayout = readerLayoutForPreferences({ readingMode });
   const handleWebViewMessage = useCallback(
     (message: unknown) => {
       onWebViewMessage(message as TtsBridgeMessage);
@@ -616,10 +623,10 @@ function ReaderContent({
         height="100%"
         initialLocation={initialCfi}
         defaultTheme={defaultTheme}
-        manager="continuous"
-        flow="scrolled-doc"
+        manager={activeLayout.manager}
+        flow={activeLayout.flow}
         enableSelection
-        keepScrollOffsetOnLocationChange
+        keepScrollOffsetOnLocationChange={activeLayout.keepScrollOffsetOnLocationChange}
         menuItems={ttsMenuItems}
         onWebViewMessage={handleWebViewMessage}
         onLocationChange={onLocationChange}

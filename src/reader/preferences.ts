@@ -1,10 +1,18 @@
-import type { Theme } from '@epubjs-react-native/core';
+import type { Flow, Manager, Theme } from '@epubjs-react-native/core';
 
 export type ReaderThemeId = 'light' | 'sepia' | 'dark';
+export type ReaderReadingMode = 'continuous' | 'paged';
 
 export type ReaderPreferences = {
   fontSize: number;
   themeId: ReaderThemeId;
+  readingMode: ReaderReadingMode;
+};
+
+export type ReaderLayout = {
+  flow: Flow;
+  keepScrollOffsetOnLocationChange: boolean;
+  manager: Manager;
 };
 
 type ReaderThemeOption = {
@@ -27,9 +35,11 @@ export const READER_FONT_SIZE_MAX = 160;
 export const READER_FONT_SIZE_STEP = 10;
 export const DEFAULT_READER_FONT_SIZE = 100;
 export const DEFAULT_READER_THEME_ID: ReaderThemeId = 'light';
+export const DEFAULT_READER_READING_MODE: ReaderReadingMode = 'continuous';
 
 export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   fontSize: DEFAULT_READER_FONT_SIZE,
+  readingMode: DEFAULT_READER_READING_MODE,
   themeId: DEFAULT_READER_THEME_ID,
 };
 
@@ -86,6 +96,10 @@ export function isReaderThemeId(value: unknown): value is ReaderThemeId {
   return typeof value === 'string' && value in READER_THEMES;
 }
 
+export function isReaderReadingMode(value: unknown): value is ReaderReadingMode {
+  return value === 'continuous' || value === 'paged';
+}
+
 export function clampReaderFontSize(size: unknown): number {
   if (typeof size !== 'number' || !Number.isFinite(size)) {
     return DEFAULT_READER_FONT_SIZE;
@@ -104,7 +118,7 @@ export function fontSizePercent(size: number): `${number}%` {
   return `${clampReaderFontSize(size)}%`;
 }
 
-export function readerThemeForPreferences({ fontSize, themeId }: ReaderPreferences): Theme {
+export function readerThemeForPreferences({ fontSize, themeId }: Pick<ReaderPreferences, 'fontSize' | 'themeId'>): Theme {
   const theme = READER_THEMES[themeId].theme;
   const body = theme.body ?? {};
 
@@ -114,6 +128,22 @@ export function readerThemeForPreferences({ fontSize, themeId }: ReaderPreferenc
       ...body,
       'font-size': `${fontSizePercent(fontSize)} !important`,
     },
+  };
+}
+
+export function readerLayoutForPreferences({ readingMode }: Pick<ReaderPreferences, 'readingMode'>): ReaderLayout {
+  if (readingMode === 'paged') {
+    return {
+      flow: 'paginated',
+      keepScrollOffsetOnLocationChange: false,
+      manager: 'default',
+    };
+  }
+
+  return {
+    flow: 'scrolled-doc',
+    keepScrollOffsetOnLocationChange: true,
+    manager: 'continuous',
   };
 }
 

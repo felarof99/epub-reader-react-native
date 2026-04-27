@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const reader = fs.readFileSync('app/reader.tsx', 'utf8');
 const preferences = fs.readFileSync('src/reader/preferences.ts', 'utf8');
 const preferenceStorage = fs.readFileSync('src/storage/readerPreferences.ts', 'utf8');
+const settingsScreen = fs.readFileSync('app/settings.tsx', 'utf8');
 const removedHighlightFiles = [
   'src/highlights/SelectionContext.tsx',
   'src/highlights/highlights.ts',
@@ -33,13 +34,17 @@ assert(
 );
 
 assert(
-  readerBlock.includes('manager="continuous"') &&
-    readerBlock.includes('flow="scrolled-doc"') &&
-    readerBlock.includes('keepScrollOffsetOnLocationChange') &&
+  readerBlock.includes('manager={activeLayout.manager}') &&
+    readerBlock.includes('flow={activeLayout.flow}') &&
+    readerBlock.includes('keepScrollOffsetOnLocationChange={activeLayout.keepScrollOffsetOnLocationChange}') &&
     readerBlock.includes('enableSelection') &&
     readerBlock.includes('menuItems={ttsMenuItems}') &&
-    !readerBlock.includes('flow="paginated"'),
-  'Reader should use continuous vertical scrolling with native text selection enabled and a custom selected-text menu.'
+    reader.includes('readerLayoutForPreferences({ readingMode })') &&
+    preferences.includes("flow: 'scrolled-doc'") &&
+    preferences.includes("flow: 'paginated'") &&
+    preferences.includes("manager: 'continuous'") &&
+    preferences.includes("manager: 'default'"),
+  'Reader should use the saved reading mode to choose continuous scroll or paginated EPUB layout.'
 );
 
 assert(
@@ -86,6 +91,12 @@ assert(
 assert(
   preferenceStorage.includes('AsyncStorage') &&
     preferenceStorage.includes('readerPreferences') &&
+    preferenceStorage.includes('isReaderReadingMode(parsed.readingMode)') &&
+    preferenceStorage.includes('isReaderReadingMode(preferences.readingMode)') &&
+    settingsScreen.includes('READING_MODE_OPTIONS') &&
+    settingsScreen.includes('Continuous scroll') &&
+    settingsScreen.includes('Page by page') &&
+    settingsScreen.includes('readerPreferences.save(next)') &&
     reader.includes('readerPreferences.get()') &&
     reader.includes('readerPreferences.save(normalized)') &&
     reader.includes('readerThemeForPreferences(savedPreferences)') &&
