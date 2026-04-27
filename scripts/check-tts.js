@@ -136,15 +136,21 @@ assert(
   'TTS control bar should show current speed as text and adjust speed only with plus/minus buttons.'
 );
 assert(
-  reader.includes("label: 'Read aloud from here'") &&
+  reader.includes("import * as Clipboard from 'expo-clipboard';") &&
+    reader.includes('const ttsMenuItems = useMemo') &&
+    reader.includes("label: 'Read aloud from here'") &&
+    reader.includes("label: 'Copy'") &&
+    reader.includes('Clipboard.setStringAsync(text)') &&
     reader.includes('menuItems={ttsMenuItems}') &&
+    reader.includes('Read aloud from here') &&
+    !reader.includes('selectedReadAloudCfi') &&
+    !reader.includes('selectedTtsPopup') &&
     reader.includes("pendingRequestRef.current = 'selected'") &&
     reader.includes('createRequestSelectedParagraphScript(requestId, trimmedCfiRange)') &&
-    reader.includes('return false;') &&
     !reader.includes('HighlightSelectionProvider') &&
     !reader.includes('useHighlightReaderBridge') &&
     !reader.includes('noteControls'),
-  'Reader should expose Read aloud from here in the selection menu without the reverted highlight rail/note UI.'
+  'Reader should expose only Read aloud from here and Copy in the native selected-text menu without the reverted highlight rail/note UI.'
 );
 assert(
   !reader.includes("label: 'Read aloud'") &&

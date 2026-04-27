@@ -1,6 +1,7 @@
 import { Reader, useReader } from '@epubjs-react-native/core';
 import type { Location, Section, Theme } from '@epubjs-react-native/core';
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -303,6 +304,12 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
     injectJavascript(createRequestSelectedParagraphScript(requestId, trimmedCfiRange));
   }, [clearTtsHighlight, injectJavascript, nextRequestId]);
 
+  const copySelectedText = useCallback((text: string) => {
+    Clipboard.setStringAsync(text).catch((error) => {
+      console.warn('Copy selected text failed', error);
+    });
+  }, []);
+
   const handleSpeedChange = useCallback(async (speed: TtsSpeed) => {
     setTtsPrefs((current) => ({ ...current, speed }));
     setSpeed(speed);
@@ -497,6 +504,7 @@ function ReaderView({ book, fileUri, initialCfi, onError }: ReaderViewProps) {
         themeId={activePreferences.themeId}
         onLocationChange={handleLocationChange}
         onReadAloudFromSelection={requestSelectedParagraph}
+        onCopySelection={copySelectedText}
         onWebViewMessage={handleTtsWebViewMessage}
         onError={onError}
       />
@@ -551,6 +559,7 @@ function ReaderContent({
   themeId,
   onLocationChange,
   onReadAloudFromSelection,
+  onCopySelection,
   onWebViewMessage,
   onError,
 }: {
@@ -565,6 +574,7 @@ function ReaderContent({
     currentSection: Section | null
   ) => void;
   onReadAloudFromSelection: (cfiRange: string) => void;
+  onCopySelection: (text: string) => void;
   onWebViewMessage: (message: TtsBridgeMessage) => void;
   onError: (message: string) => void;
 }) {
@@ -585,8 +595,16 @@ function ReaderContent({
           return false;
         },
       },
+      {
+        key: 'copy',
+        label: 'Copy',
+        action: (_cfiRange: string, text: string) => {
+          onCopySelection(text);
+          return false;
+        },
+      },
     ],
-    [onReadAloudFromSelection]
+    [onCopySelection, onReadAloudFromSelection]
   );
 
   return (

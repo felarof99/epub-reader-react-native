@@ -39,7 +39,7 @@ assert(
     readerBlock.includes('enableSelection') &&
     readerBlock.includes('menuItems={ttsMenuItems}') &&
     !readerBlock.includes('flow="paginated"'),
-  'Reader should use continuous vertical scrolling with native text selection enabled and a selected-text TTS menu.'
+  'Reader should use continuous vertical scrolling with native text selection enabled and a custom selected-text menu.'
 );
 
 assert(
